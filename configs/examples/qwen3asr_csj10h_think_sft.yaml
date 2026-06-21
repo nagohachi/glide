@@ -1,0 +1,27 @@
+# THINKING CSJ-10h run (native_think_phone_nospace: `text` already holds
+# "<think>\n...## Phonemes...## Transcription...\n</think>\n\n{transcript}").
+# Shared settings live in qwen3asr_csj10h_base.yaml.
+#   wait_gpu 6 --server sacs04 --priority 2 --name csj10h_think ./scripts/run_csj10h_think.sh
+extends: [qwen3asr_csj10h_base.yaml]
+
+data:
+  train: native_think_phone_nospace_10h/train.jsonl   # 10h think subset
+  eval: native_think_phone_nospace/dev.jsonl
+  # No reasoning_field: the <think> block is embedded in `text`, rendered verbatim.
+
+template:
+  system_prompt: "Please transcribe the speech into phonemes, then output the text based on the speech content and phoneme context. Output the phonemes under ## Phonemes, and the text under ## Transcription."
+  enable_thinking: true               # prompt prefix "...assistant\n"; supervise <think>...+transcript
+
+eval:
+  answer_after: "</think>"            # score only the transcript after the thinking block
+
+logging:
+  run_name: csj10h_think
+  tags: [csj, 10h, qwen3asr-aut, qwen3-1.7b, fa2-varlen, think]
+
+training:
+  output_dir: outputs/qwen3asr_csj10h_think_sft
+  num_train_epochs: 20
+  learning_rate: 2.0e-5
+  warmup_ratio: 0.05
