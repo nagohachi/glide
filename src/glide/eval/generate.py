@@ -24,7 +24,7 @@ from ..data.audio import load_audio
 from ..data.template import build_prompt_messages, extract_reference
 from ..metrics.text_metrics import build_metric_fn
 
-__all__ = ["GenerationEvaluator", "GenerateEvalCallback"]
+__all__ = ["GenerationEvaluator", "GenerateEvalCallback", "TestEvalCallback"]
 
 
 class GenerationEvaluator:
@@ -124,11 +124,13 @@ class GenerationEvaluator:
     def _references(records, data_cfg):
         return [extract_reference(r, data_cfg) or "" for r in records]
 
-    def evaluate(self, model, save_path: str | Path | None = None, step: int | None = None) -> dict[str, float]:
+    def evaluate(self, model, save_path: str | Path | None = None, step: int | None = None, prefix: str = "eval") -> dict[str, float]:
         """Run generation over all eval records and return the metric dict.
 
         If *save_path* is given the per-sample predictions are written there as
         JSONL (overwriting any previous file so only the latest run is kept).
+        Metric keys are prefixed with *prefix* (``"eval"`` during training,
+        ``"test"`` at the end-of-training test evaluation).
         """
         import torch
 
@@ -184,7 +186,7 @@ class GenerationEvaluator:
                         row["step"] = step
                     f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-        return {f"eval_{k}": v for k, v in result.items()}
+        return {f"{prefix}_{k}": v for k, v in result.items()}
 
 
 class GenerateEvalCallback(TrainerCallback):
@@ -212,3 +214,27 @@ class GenerateEvalCallback(TrainerCallback):
                 self._trainer.log(metrics)
             else:
                 print(f"[glide][generate-eval] step {state.global_step}: {metrics}")
+
+
+class TestEvalCallback(TrainerCallback):
+    """Trainer callback that runs :class:`GenerationEvaluator` on test data at end of training."""
+
+    def __init__(self, evaluator: GenerationEvaluator):
+        self.evaluator = evaluator
+        self._trainer: Any = None
+
+    def on_train_end(self, args, state, control, model=None, **kwargs):
+        if model is None:
+            return
+        save_path = None
+        if state.is_world_process_zero:
+            save_path = os.path.join(args.output_dir, "test_predictions.jsonl")
+        metrics = self.evaluator.evaluate(
+            model, save_path=save_path, step=state.global_step, prefix="test"
+        )
+        if metrics:
+            state.log_history.append({**metrics, "step": state.global_step})
+            if hasattr(self, "_trainer") and self._trainer is not None:
+                self._trainer.log(metrics)
+            else:
+                print(f"[glide][test-eval] step {state.global_step}: {metrics}")

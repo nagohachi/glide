@@ -19,7 +19,7 @@ from ..data.build import (
 from ..data.collator import MultimodalSFTCollator
 from ..data.jsonl import read_jsonl
 from ..models.loader import load_model_and_processor
-from .common import init_plugins, maybe_generation_callback
+from .common import init_plugins, maybe_generation_callback, maybe_test_callback
 from .length_sampler_trainer import LengthGroupedSFTTrainer
 
 __all__ = ["build_sft_trainer"]
@@ -120,6 +120,9 @@ def build_sft_trainer(config: GlideConfig):
     gen_cb = maybe_generation_callback(config, loaded.processor, eval_records)
     if gen_cb is not None:
         callbacks.append(gen_cb)
+    test_cb = maybe_test_callback(config, loaded.processor)
+    if test_cb is not None:
+        callbacks.append(test_cb)
 
     if config.modality is Modality.TEXT:
         trainer = SFTTrainer(

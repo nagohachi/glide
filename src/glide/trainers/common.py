@@ -3,10 +3,10 @@
 from typing import Callable
 
 from ..config.schema import GlideConfig
-from ..eval.generate import GenerateEvalCallback, GenerationEvaluator
+from ..eval.generate import GenerateEvalCallback, GenerationEvaluator, TestEvalCallback
 from ..registry import load_plugins, rewards
 
-__all__ = ["init_plugins", "build_reward_funcs", "maybe_generation_callback"]
+__all__ = ["init_plugins", "build_reward_funcs", "maybe_generation_callback", "maybe_test_callback"]
 
 
 def init_plugins(config: GlideConfig) -> None:
@@ -36,3 +36,19 @@ def maybe_generation_callback(config: GlideConfig, processor, eval_records):
         return None
     evaluator = GenerationEvaluator(config, processor, eval_records)
     return GenerateEvalCallback(evaluator)
+
+
+def maybe_test_callback(config: GlideConfig, processor):
+    """Build a :class:`TestEvalCallback` from ``data.test`` if configured."""
+    if not config.eval.generate.enabled or config.data.test is None:
+        return None
+    from ..data.jsonl import read_jsonl
+
+    paths = config.data.test if isinstance(config.data.test, list) else [config.data.test]
+    test_records = []
+    for p in paths:
+        test_records.extend(read_jsonl(p))
+    if not test_records:
+        return None
+    evaluator = GenerationEvaluator(config, processor, test_records)
+    return TestEvalCallback(evaluator)

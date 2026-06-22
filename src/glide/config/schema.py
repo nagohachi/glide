@@ -132,6 +132,8 @@ class DataConfig:
     train: str | list[str] | None = None
     #: Path(s) to evaluation/validation JSONL file(s) (relative to the corpus root).
     eval: str | list[str] | None = None
+    #: Path(s) to held-out test JSONL file(s) evaluated once at the end of training.
+    test: str | list[str] | None = None
     #: Read records lazily by byte offset instead of loading into memory.
     lazy: bool = True
     #: Field names in each JSONL record.
