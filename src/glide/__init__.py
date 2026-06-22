@@ -57,8 +57,8 @@ Module overview
     and ``glide docs``.
 """
 
-from . import cli, config, data, eval, metrics, models, plugins, trainers
-
 __version__ = "0.1.0"
+
+from . import cli, config, data, eval, metrics, models, plugins, trainers
 
 __all__ = ["__version__", "cli", "config", "data", "eval", "metrics", "models", "plugins", "trainers"]
