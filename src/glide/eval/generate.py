@@ -11,7 +11,10 @@ response.
 appear in the training logs / wandb / tensorboard each evaluation.
 """
 
+import json
+import os
 import re
+from pathlib import Path
 from typing import Any, Sequence
 
 from transformers import TrainerCallback
@@ -121,8 +124,12 @@ class GenerationEvaluator:
     def _references(records, data_cfg):
         return [extract_reference(r, data_cfg) or "" for r in records]
 
-    def evaluate(self, model) -> dict[str, float]:
-        """Run generation over all eval records and return the metric dict."""
+    def evaluate(self, model, save_path: str | Path | None = None, step: int | None = None) -> dict[str, float]:
+        """Run generation over all eval records and return the metric dict.
+
+        If *save_path* is given the per-sample predictions are written there as
+        JSONL (overwriting any previous file so only the latest run is kept).
+        """
         import torch
 
         gen_model = getattr(model, "module", model)  # unwrap DDP for .generate/.encoder
@@ -166,6 +173,17 @@ class GenerationEvaluator:
             predictions = [self._extract_answer(p) for p in predictions]
             references = [self._extract_answer(r) for r in references]
         result = self.metric_fn(predictions, references)
+
+        if save_path is not None:
+            save_path = Path(save_path)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with save_path.open("w", encoding="utf-8") as f:
+                for pred, ref in zip(predictions, references):
+                    row: dict[str, Any] = {"prediction": pred, "reference": ref}
+                    if step is not None:
+                        row["step"] = step
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
         return {f"eval_{k}": v for k, v in result.items()}
 
 
@@ -180,7 +198,11 @@ class GenerateEvalCallback(TrainerCallback):
     def on_evaluate(self, args, state, control, model=None, **kwargs):
         if model is None:
             return
-        metrics = self.evaluator.evaluate(model)
+        # Write JSONL only from global rank 0; local_rank would fire once per node.
+        save_path = None
+        if state.is_world_process_zero:
+            save_path = os.path.join(args.output_dir, "eval_predictions.jsonl")
+        metrics = self.evaluator.evaluate(model, save_path=save_path, step=state.global_step)
         if metrics:
             # Surface in logs / wandb / tensorboard.
             from transformers.trainer_callback import TrainerControl  # noqa: F401
