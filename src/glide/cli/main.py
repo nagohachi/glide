@@ -100,11 +100,20 @@ def _discover_modules() -> list[str]:
     return mods
 
 
+_GITHUB_REPO = "https://github.com/nagohachi/glide"
+_GITHUB_SRC = f"{_GITHUB_REPO}/blob/main/src/glide/"
+
+
 def _run_docs(output: str, serve: bool) -> int:
     import subprocess
 
     modules = _discover_modules()
-    cmd = ["pdoc", *modules]
+    cmd = [
+        "pdoc", *modules,
+        "--edit-url", f"glide={_GITHUB_SRC}",
+        "--logo", "https://github.com/nagohachi.png",
+        "--logo-link", _GITHUB_REPO,
+    ]
     cmd += ["--http", ":8080"] if serve else ["-o", output]
     print(f"[glide] generating docs for {len(modules)} modules -> "
           f"{'http://localhost:8080' if serve else output}")
