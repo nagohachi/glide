@@ -166,10 +166,6 @@ def _run_docs(output: str, serve: bool) -> int:
         *modules,
         "--edit-url",
         f"glide={_GITHUB_SRC}",
-        "--logo",
-        "https://github.com/nagohachi.png",
-        "--logo-link",
-        _GITHUB_REPO,
         "--template-directory",
         _TEMPLATE_DIR,
     ]
