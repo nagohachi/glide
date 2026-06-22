@@ -93,7 +93,8 @@ as `glide_config.yaml`.
 glide sft   [config.yaml] [--dotted.key value ...]   # supervised fine-tuning
 glide grpo  [config.yaml] ...                         # GRPO
 glide gspo  [config.yaml] ...                         # GSPO (sequence-level IS)
-glide eval  [config.yaml] ...                         # AR-decoding eval + metrics
+glide eval  [config.yaml] [-c checkpoint] ...         # AR-decoding eval on data.eval
+glide test  [config.yaml] [-c checkpoint] [-o preds.jsonl]  # held-out test on data.test
 glide docs  [-o docs/api] [--serve]                   # API docs from docstrings
 ```
 
@@ -187,18 +188,73 @@ custom multimodal components.
 
 ---
 
+## Evaluation & testing
+
+### During training
+
+Set `data.eval` and `eval.generate.enabled: true` to run autoregressive decoding
+at each evaluation step. Metrics are logged to the trainer (stdout, wandb, tensorboard)
+and per-sample predictions are saved to `{output_dir}/eval_predictions.jsonl`
+(overwritten each run so only the latest checkpoint's output is kept):
+
+```yaml
+data:
+  train: data/train.jsonl
+  eval:  data/dev.jsonl
+  test:  data/test.jsonl   # evaluated once at the very end of training
+
+eval:
+  generate:
+    enabled: true
+    max_new_tokens: 256
+    num_beams: 1           # 1 = greedy; increase for beam search
+    batch_size: 8
+  metrics: [cer, wer]      # any of: wer, cer, bleu, rouge
+  normalize_text: true
+```
+
+At the end of training, `data.test` is evaluated once and saved to
+`{output_dir}/test_predictions.jsonl` with `test_*` metric keys.
+
+### Standalone evaluation
+
+Run on a validation set from any checkpoint:
+
+```bash
+glide eval configs/my_sft.yaml -c outputs/v1-20250601/checkpoint-1000
+```
+
+### Standalone test evaluation
+
+Run on the held-out test set, optionally saving per-sample predictions:
+
+```bash
+glide test configs/my_sft.yaml -c outputs/v1-20250601/checkpoint-1000
+glide test configs/my_sft.yaml -c outputs/v1-20250601/checkpoint-1000 -o preds.jsonl
+```
+
+Both commands accept any `--dotted.key value` override, so you can point at a
+different test file without editing the YAML:
+
+```bash
+glide test configs/my_sft.yaml -c path/to/checkpoint --data.test other_test.jsonl
+```
+
+---
+
 ## Documentation & tutorials
 
 ```bash
 glide docs -o docs/api        # generate HTML API docs from docstrings (pdoc)
+glide docs --serve             # live-reload at http://localhost:8080
 ```
 
 Tutorials in [`docs/tutorials/`](docs/tutorials/): LLM-SFT, LLM-GRPO, Speech-SFT,
-Speech-GRPO.
+Speech-GRPO. Online: [nagohachi.github.io/glide](https://nagohachi.github.io/glide/).
 
 ---
 
-## Testing
+## Unit & integration tests
 
 CPU and GPU tests are separable:
 
