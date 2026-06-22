@@ -6,6 +6,7 @@ Commands
 ``grpo``  Group Relative Policy Optimization.
 ``gspo``  Group Sequence Policy Optimization (GRPO with sequence-level IS).
 ``eval``  Validation-time autoregressive decoding + metrics on a checkpoint.
+``test``  Held-out test evaluation on ``data.test`` at the end of training.
 ``docs``  Generate API documentation from source + docstrings (pdoc).
 
 Any argument after the optional config path is treated as a dotted override, e.g.::
@@ -33,6 +34,24 @@ def _build_parser() -> argparse.ArgumentParser:
 
     pe = sub.add_parser("eval", help="Run AR-decoding evaluation + metrics.")
     pe.add_argument("config", nargs="?", default=None, help="Path to the run YAML.")
+    pe.add_argument(
+        "--checkpoint",
+        "-c",
+        default=None,
+        help="Model checkpoint path or HF hub id (overrides model.name).",
+    )
+
+    pt = sub.add_parser("test", help="Run held-out test evaluation on data.test.")
+    pt.add_argument("config", nargs="?", default=None, help="Path to the run YAML.")
+    pt.add_argument(
+        "--checkpoint",
+        "-c",
+        default=None,
+        help="Model checkpoint path or HF hub id (overrides model.name).",
+    )
+    pt.add_argument(
+        "--output", "-o", default=None, help="Save per-sample predictions to this JSONL file."
+    )
 
     pd = sub.add_parser("docs", help="Generate API docs from docstrings (pdoc).")
     pd.add_argument("--output", "-o", default="docs/api", help="Output directory.")
@@ -62,13 +81,15 @@ def _run_training(config, task: str) -> int:
     return 0
 
 
-def _run_eval(config_path, overrides: list[str]) -> int:
+def _run_eval(config_path, overrides: list[str], checkpoint: str | None = None) -> int:
     from ..config.loader import load_config
     from ..data.jsonl import read_jsonl
     from ..eval.generate import GenerationEvaluator
     from ..models.loader import load_model_and_processor
     from ..trainers.common import init_plugins
 
+    if checkpoint:
+        overrides = [*overrides, f"model.name={checkpoint}"]
     config = load_config(config_path, overrides, task="sft")
     config.eval.generate.enabled = True
     init_plugins(config)
@@ -85,6 +106,36 @@ def _run_eval(config_path, overrides: list[str]) -> int:
     evaluator = GenerationEvaluator(config, loaded.processor, records)
     metrics = evaluator.evaluate(loaded.model)
     print("[glide][eval]", metrics)
+    return 0
+
+
+def _run_test(
+    config_path, overrides: list[str], checkpoint: str | None = None, output: str | None = None
+) -> int:
+    from ..config.loader import load_config
+    from ..data.jsonl import read_jsonl
+    from ..eval.generate import GenerationEvaluator
+    from ..models.loader import load_model_and_processor
+    from ..trainers.common import init_plugins
+
+    if checkpoint:
+        overrides = [*overrides, f"model.name={checkpoint}"]
+    config = load_config(config_path, overrides, task="sft")
+    config.eval.generate.enabled = True
+    init_plugins(config)
+    loaded = load_model_and_processor(config)
+
+    if config.data.test is None:
+        print("[glide] no data.test configured; nothing to evaluate.", file=sys.stderr)
+        return 1
+    paths = config.data.test if isinstance(config.data.test, list) else [config.data.test]
+    records = []
+    for p in paths:
+        records.extend(read_jsonl(p))
+
+    evaluator = GenerationEvaluator(config, loaded.processor, records)
+    metrics = evaluator.evaluate(loaded.model, save_path=output, prefix="test")
+    print("[glide][test]", metrics)
     return 0
 
 
@@ -109,14 +160,20 @@ def _run_docs(output: str, serve: bool) -> int:
 
     modules = _discover_modules()
     cmd = [
-        "pdoc", *modules,
-        "--edit-url", f"glide={_GITHUB_SRC}",
-        "--logo", "https://github.com/nagohachi.png",
-        "--logo-link", _GITHUB_REPO,
+        "pdoc",
+        *modules,
+        "--edit-url",
+        f"glide={_GITHUB_SRC}",
+        "--logo",
+        "https://github.com/nagohachi.png",
+        "--logo-link",
+        _GITHUB_REPO,
     ]
     cmd += ["--http", ":8080"] if serve else ["-o", output]
-    print(f"[glide] generating docs for {len(modules)} modules -> "
-          f"{'http://localhost:8080' if serve else output}")
+    print(
+        f"[glide] generating docs for {len(modules)} modules -> "
+        f"{'http://localhost:8080' if serve else output}"
+    )
     return subprocess.call(cmd)
 
 
@@ -147,8 +204,9 @@ def _resolve_nproc(dist_cfg) -> int:
         return max(1, ngpu)
     n = int(dist_cfg.nproc_per_node)
     if ngpu and n > ngpu:
-        print(f"[glide] distributed.nproc_per_node={n} > visible GPUs ({ngpu}); "
-              f"clamping to {ngpu}.")
+        print(
+            f"[glide] distributed.nproc_per_node={n} > visible GPUs ({ngpu}); clamping to {ngpu}."
+        )
         n = ngpu
     return n
 
@@ -206,7 +264,9 @@ def main(argv: list[str] | None = None) -> int:
                 return _relaunch_distributed(argv, config.distributed, nproc)
         return _run_training(config, args.command)
     if args.command == "eval":
-        return _run_eval(args.config, overrides)
+        return _run_eval(args.config, overrides, args.checkpoint)
+    if args.command == "test":
+        return _run_test(args.config, overrides, args.checkpoint, args.output)
     if args.command == "docs":
         return _run_docs(args.output, args.serve)
     parser.error(f"Unknown command: {args.command}")
