@@ -153,6 +153,8 @@ def _discover_modules() -> list[str]:
 
 _GITHUB_REPO = "https://github.com/nagohachi/glide"
 _GITHUB_SRC = f"{_GITHUB_REPO}/blob/main/src/glide/"
+# docs/templates is four levels above this file: src/glide/cli/main.py -> repo root
+_TEMPLATE_DIR = str(__import__("pathlib").Path(__file__).parents[3] / "docs" / "templates")
 
 
 def _run_docs(output: str, serve: bool) -> int:
@@ -168,6 +170,8 @@ def _run_docs(output: str, serve: bool) -> int:
         "https://github.com/nagohachi.png",
         "--logo-link",
         _GITHUB_REPO,
+        "--template-directory",
+        _TEMPLATE_DIR,
     ]
     cmd += ["--http", ":8080"] if serve else ["-o", output]
     print(
