@@ -133,7 +133,8 @@ def _run_test(
     for p in paths:
         records.extend(read_jsonl(p))
 
-    evaluator = GenerationEvaluator(config, loaded.processor, records)
+    # Test evaluation always scores the full set; max_eval_samples only caps validation.
+    evaluator = GenerationEvaluator(config, loaded.processor, records, cap_samples=False)
     metrics = evaluator.evaluate(loaded.model, save_path=output, prefix="test")
     print("[glide][test]", metrics)
     return 0

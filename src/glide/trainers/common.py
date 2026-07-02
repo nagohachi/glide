@@ -50,5 +50,6 @@ def maybe_test_callback(config: GlideConfig, processor):
         test_records.extend(read_jsonl(p))
     if not test_records:
         return None
-    evaluator = GenerationEvaluator(config, processor, test_records)
+    # Test evaluation always scores the full set; max_eval_samples only caps validation.
+    evaluator = GenerationEvaluator(config, processor, test_records, cap_samples=False)
     return TestEvalCallback(evaluator)
