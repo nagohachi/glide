@@ -5,8 +5,12 @@
   (Group *Sequence* Policy Optimization is GRPO with sequence-level IS).
 
 Reward functions and their weights come from the config (see
-:func:`glide.trainers.common.build_reward_funcs`). RL currently targets text
-prompts; speech/vision RL is gated with an explanatory error.
+:func:`glide.trainers.common.build_reward_funcs`).
+
+* **text** modality -> the TRL ``GRPOTrainer`` path above.
+* **speech** modality -> :class:`glide.trainers.rl_speech.SpeechGSPOTrainer`, a
+  self-contained loop that rolls out *with audio* (which the text TRL path cannot)
+  through a vLLM server on a separate GPU. Vision RL is still gated with an error.
 """
 
 from ..config.schema import GlideConfig, Modality, Task
@@ -20,11 +24,10 @@ __all__ = ["build_rl_trainer"]
 
 
 def _check_modality(config: GlideConfig) -> None:
-    if config.modality is not Modality.TEXT:
+    if config.modality is Modality.VISION:
         raise NotImplementedError(
-            f"RL ({config.task.value}) currently supports the text modality only. "
-            "For speech/vision RL, run generation through a vLLM rollout server and "
-            "register a custom reward function (see docs/tutorials/speech_grpo.md)."
+            f"RL ({config.task.value}) does not support the vision modality yet. "
+            "Text and speech (audio-in-the-loop GSPO/GRPO) are supported."
         )
 
 
@@ -32,12 +35,19 @@ def build_rl_trainer(config: GlideConfig):
     """Build a ready-to-train RL trainer (GRPO/GSPO) from ``config``."""
     init_plugins(config)
     _check_modality(config)
+
+    if config.task not in (Task.GRPO, Task.GSPO):
+        raise ValueError(f"Unsupported RL task: {config.task}")
+
+    # Speech RL needs audio in the rollout -> dedicated loop (TRL GRPO is text-only).
+    if config.modality is Modality.SPEECH:
+        from .rl_speech import build_speech_rl_trainer
+
+        return build_speech_rl_trainer(config)
+
     loaded = load_model_and_processor(config)
     reward_funcs, reward_weights = build_reward_funcs(config)
-
-    if config.task in (Task.GRPO, Task.GSPO):
-        return _build_grpo_trainer(config, loaded, reward_funcs, reward_weights)
-    raise ValueError(f"Unsupported RL task: {config.task}")
+    return _build_grpo_trainer(config, loaded, reward_funcs, reward_weights)
 
 
 def _common_rl_training_defaults(config: GlideConfig) -> None:
