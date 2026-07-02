@@ -152,6 +152,26 @@ class SpeechLLM(nn.Module):
                 self._tok_total = mask.sum()
         return out
 
+    def logits_with_audio(self, input_ids, attention_mask,
+                          input_features=None, feature_attention_mask=None,
+                          input_values=None, audio_attention_mask=None):
+        """Run a (grad-enabled) forward and return ``(logits, spliced_attention_mask)``.
+
+        Unlike :meth:`forward` (which folds the loss in and hides the post-splice
+        mask), this exposes both tensors so callers can score arbitrary token spans
+        -- e.g. RL completion log-probs. The returned ``logits`` are over the
+        *spliced* sequence ``[prefix, audio_frames, suffix, completion, pad...]`` and
+        ``spliced_attention_mask`` (right-padded) gives each row's valid length, which
+        is needed to locate the (trailing) completion block past the audio splice.
+        """
+        enc = self._encoder_inputs(input_features, feature_attention_mask,
+                                   input_values, audio_attention_mask)
+        audio_embeds, audio_lengths = self._encode_audio(enc)
+        inputs_embeds, attn, _ = self._splice(input_ids, attention_mask, None,
+                                              audio_embeds, audio_lengths)
+        out = self.llm(inputs_embeds=inputs_embeds, attention_mask=attn)
+        return out.logits, attn
+
     @torch.no_grad()
     def generate(self, input_ids=None, attention_mask=None,
                  input_features=None, feature_attention_mask=None,
