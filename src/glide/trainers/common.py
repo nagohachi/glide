@@ -24,7 +24,7 @@ def build_reward_funcs(config: GlideConfig) -> tuple[list[Callable], list[float]
     for spec in config.rl.rewards:
         builder = rewards.get(spec.name)
         fn = builder(**spec.kwargs)
-        fn.__name__ = getattr(fn, "__name__", spec.name) or spec.name
+        fn.__name__ = spec.name
         funcs.append(fn)
         weights.append(spec.weight)
     return funcs, weights
