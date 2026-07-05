@@ -76,7 +76,7 @@ def apply_special_tokens(processor, model, cfg: SpecialTokensConfig) -> SpecialT
             )
 
     if cfg.resize_embeddings and model is not None and info.num_added > 0:
-        _resize_with_mean_init(model, len(tokenizer), cfg.pad_to_multiple_of)
+        _resize_with_mean_init(model, len(tokenizer), info.num_added, cfg.pad_to_multiple_of)
 
     # Resolve ids for the semantic markers.
     def _id(tok):
@@ -89,19 +89,36 @@ def apply_special_tokens(processor, model, cfg: SpecialTokensConfig) -> SpecialT
     return info
 
 
-def _resize_with_mean_init(model, new_size: int, pad_to_multiple_of: int | None) -> None:
-    """Resize embeddings, initializing new rows to the mean of existing ones."""
+def _resize_with_mean_init(
+    model, vocab_size: int, num_added: int, pad_to_multiple_of: int | None
+) -> None:
+    """Resize embeddings and mean-init the newly-added token rows.
+
+    ``vocab_size`` is ``len(tokenizer)`` *after* adding tokens; ``num_added`` is how
+    many were added (their ids are the last ``num_added`` of the vocab). We must NOT
+    key off the old embedding row count: Qwen-family checkpoints pad the embedding far
+    beyond ``len(tokenizer)`` (e.g. 151936 rows for a ~151669-token vocab), so comparing
+    against the padded size both (a) skips the mean-init for genuinely new tokens whose
+    id lands inside the pre-existing padding rows, and (b) would resize the matrix
+    *downward*, dropping trained rows. Instead we mean-init the specific new ids and
+    never shrink below the existing matrix.
+    """
     import torch
 
     old_embeddings = model.get_input_embeddings()
     old_num = old_embeddings.weight.size(0)
-    model.resize_token_embeddings(new_size, pad_to_multiple_of=pad_to_multiple_of)
+    # Never shrink: keep at least the existing (possibly padded) row count.
+    target = max(vocab_size, old_num)
+    model.resize_token_embeddings(target, pad_to_multiple_of=pad_to_multiple_of)
 
-    if new_size > old_num:
-        with torch.no_grad():
-            inp = model.get_input_embeddings().weight
-            mean = inp[:old_num].mean(dim=0)
-            inp[old_num:] = mean
-            out = model.get_output_embeddings()
-            if out is not None and out.weight.size(0) >= new_size:
-                out.weight[old_num:] = out.weight[:old_num].mean(dim=0)
+    if num_added <= 0:
+        return
+    # New tokens occupy ids [vocab_size - num_added, vocab_size); mean over the prior
+    # (real, trained) token rows only -- not the untrained padding rows above them.
+    old_vocab = vocab_size - num_added
+    with torch.no_grad():
+        inp = model.get_input_embeddings().weight
+        inp[old_vocab:vocab_size] = inp[:old_vocab].mean(dim=0)
+        out = model.get_output_embeddings()
+        if out is not None and out.weight.data_ptr() != inp.data_ptr():
+            out.weight[old_vocab:vocab_size] = out.weight[:old_vocab].mean(dim=0)
