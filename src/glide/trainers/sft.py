@@ -66,12 +66,28 @@ def _peft_config(config: GlideConfig):
     from peft import LoraConfig
 
     p = config.peft
+    target_modules = p.target_modules
+    modules_to_save = list(p.modules_to_save or [])
+    if config.modality is Modality.SPEECH and config.speech.encoder.name:
+        # Composed SpeechLLM is a plain nn.Module (not a PreTrainedModel). 'all-linear'
+        # would LoRA-wrap EVERY nn.Linear in the tree: the from-scratch projector (its
+        # random base weights frozen -> the modality bridge can never learn), the frozen
+        # encoder's linears (unintended trainable adapters), and lm_head. Instead target
+        # only the LLM's attention/MLP projections via a regex anchored on `llm.` (so the
+        # encoder's identically-named q_proj/... are excluded), and keep the projector
+        # fully trainable through modules_to_save.
+        if target_modules == "all-linear" or target_modules is None:
+            target_modules = (
+                r"llm\.model\..*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)"
+            )
+        if "projector" not in modules_to_save:
+            modules_to_save.append("projector")
     return LoraConfig(
         r=p.r,
         lora_alpha=p.lora_alpha,
         lora_dropout=p.lora_dropout,
-        target_modules=p.target_modules,
-        modules_to_save=p.modules_to_save or None,
+        target_modules=target_modules,
+        modules_to_save=modules_to_save or None,
         bias=p.bias,
         task_type="CAUSAL_LM",
     )
