@@ -15,6 +15,7 @@ For the **text** path, ``glide`` defers to TRL's ``SFTTrainer`` collators
 """
 
 import inspect
+import warnings
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -96,6 +97,17 @@ class MultimodalSFTCollator:
             self.response_template_ids = self.tokenizer.encode(
                 self.template.response_template, add_special_tokens=False
             )
+        # Fail loudly instead of silently training full-LM: with completion-only loss
+        # requested but no usable response_template, the masking guard below would be a
+        # no-op and the whole prompt (system + expanded media pads) would be supervised.
+        if self.completion_only and not self.response_template_ids:
+            raise ValueError(
+                "template.train_on_completions_only=True but no usable "
+                "template.response_template is set for the multimodal SFT collator. "
+                "Set template.response_template (e.g. '<|im_start|>assistant\\n') so the "
+                "completion boundary can be located, or set "
+                "template.train_on_completions_only=False to train on the full sequence."
+            )
 
     def _load_media(self, record: dict):
         if self.modality is Modality.SPEECH and self.data.audio_field in record:
@@ -143,11 +155,21 @@ class MultimodalSFTCollator:
 
         if self.completion_only and self.response_template_ids:
             rt = self.response_template_ids
+            missed = 0
             for row in range(input_ids.size(0)):
                 ids = input_ids[row].tolist()
                 start = find_subsequence(ids, rt)
                 if start == -1:
                     labels[row, :] = -100  # response not found -> skip this row
+                    missed += 1
                 else:
                     labels[row, : start + len(rt)] = -100
+            if missed:
+                warnings.warn(
+                    f"response_template matched no position in {missed}/{input_ids.size(0)} "
+                    "batch rows; those rows are fully loss-masked (labels=-100). This is "
+                    "usually a tokenization-boundary mismatch between the standalone-encoded "
+                    "template and its in-context tokenization -- check template.response_template.",
+                    stacklevel=2,
+                )
         return labels
