@@ -119,7 +119,9 @@ class GenerationEvaluator:
                 ref = rec[self.config.data.image_field]
                 media.append(Image.open(ref).convert("RGB") if isinstance(ref, str) else ref)
 
-        # Left padding is required for correct batched generation.
+        # Left padding is required for correct batched generation. Restore in a finally
+        # so an exception mid-eval doesn't leave the shared tokenizer in left-padding
+        # mode for the training collators.
         prev_side = self.tokenizer.padding_side
         self.tokenizer.padding_side = "left"
         call_kwargs: dict[str, Any] = {"text": texts, "return_tensors": "pt", "padding": True}
@@ -128,8 +130,10 @@ class GenerationEvaluator:
             call_kwargs[kw] = media
             if modality is Modality.SPEECH:
                 call_kwargs["sampling_rate"] = self.config.speech.sample_rate
-        inputs = self.processor(**call_kwargs)
-        self.tokenizer.padding_side = prev_side
+        try:
+            inputs = self.processor(**call_kwargs)
+        finally:
+            self.tokenizer.padding_side = prev_side
         return {k: (v.to(device) if hasattr(v, "to") else v) for k, v in inputs.items()}
 
     @staticmethod
@@ -218,13 +222,12 @@ class GenerateEvalCallback(TrainerCallback):
             save_path = os.path.join(args.output_dir, "eval_predictions.jsonl")
         metrics = self.evaluator.evaluate(model, save_path=save_path, step=state.global_step)
         if metrics:
-            # Surface in logs / wandb / tensorboard.
-            from transformers.trainer_callback import TrainerControl  # noqa: F401
-
-            state.log_history.append({**metrics, "step": state.global_step})
-            if hasattr(self, "_trainer") and self._trainer is not None:
+            # Trainer.log() already appends to state.log_history; only append manually on
+            # the no-trainer path, else every metric lands in trainer_state.json twice.
+            if getattr(self, "_trainer", None) is not None:
                 self._trainer.log(metrics)
             else:
+                state.log_history.append({**metrics, "step": state.global_step})
                 print(f"[glide][generate-eval] step {state.global_step}: {metrics}")
 
 
@@ -245,8 +248,8 @@ class TestEvalCallback(TrainerCallback):
             model, save_path=save_path, step=state.global_step, prefix="test"
         )
         if metrics:
-            state.log_history.append({**metrics, "step": state.global_step})
-            if hasattr(self, "_trainer") and self._trainer is not None:
+            if getattr(self, "_trainer", None) is not None:
                 self._trainer.log(metrics)
             else:
+                state.log_history.append({**metrics, "step": state.global_step})
                 print(f"[glide][test-eval] step {state.global_step}: {metrics}")

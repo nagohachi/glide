@@ -71,6 +71,15 @@ class IdentityProjector(Projector):
 
 @projectors.register("identity", exist_ok=True)
 def build_identity(cfg: ProjectorConfig, in_dim: int, out_dim: int):
+    # IdentityProjector cannot downsample (frame stacking would change the feature dim),
+    # yet SpeechLLM still divides audio_lengths by projector.downsample -> the spliced
+    # audio would be silently truncated. Reject the incompatible combination loudly.
+    if cfg.downsample and cfg.downsample > 1:
+        raise ValueError(
+            f"projector 'identity' does not support downsample>1 (got {cfg.downsample}); "
+            "SpeechLLM would divide audio_lengths without shortening the frames, "
+            "truncating the spliced audio. Use 'mlp_gelu' for frame stacking."
+        )
     return IdentityProjector(in_dim, out_dim)
 
 

@@ -24,6 +24,7 @@ fails, the current working directory (the project root from which ``glide`` was
 invoked) is added to ``sys.path`` as a fallback.
 """
 
+import hashlib
 import importlib
 import importlib.util
 import os
@@ -99,8 +100,17 @@ collators: Registry[Callable] = Registry("data collator")
 
 
 def _import_file(path: Path) -> None:
-    """Import a ``.py`` file as a standalone module (no ``sys.path`` mutation)."""
-    mod_name = f"glide_plugin_{path.stem}"
+    """Import a ``.py`` file as a standalone module (no ``sys.path`` mutation).
+
+    The module name embeds a hash of the *resolved* path so same-basename plugins in
+    different directories don't collide, and re-importing the same file is idempotent
+    (re-executing it would die on duplicate registration).
+    """
+    path = path.resolve()
+    digest = hashlib.sha1(str(path).encode()).hexdigest()[:8]
+    mod_name = f"glide_plugin_{path.stem}_{digest}"
+    if mod_name in sys.modules:
+        return  # this exact file was already imported
     spec = importlib.util.spec_from_file_location(mod_name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load plugin file: {path}")

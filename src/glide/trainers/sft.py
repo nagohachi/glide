@@ -95,8 +95,13 @@ def _augment_training_defaults(config: GlideConfig) -> None:
         t.setdefault("remove_unused_columns", False)
         # Composed SpeechLLM is a plain nn.Module whose LLM ties embeddings<->lm_head
         # (shared storage); safetensors refuses shared tensors, so use torch.save.
+        # `save_safetensors` was removed from TrainingArguments in transformers 5.12;
+        # only set it when the field still exists (else build_training_args rejects it).
         if config.modality is Modality.SPEECH and config.speech.encoder.name:
-            t.setdefault("save_safetensors", False)
+            import dataclasses as _dc
+
+            if any(f.name == "save_safetensors" for f in _dc.fields(SFTConfig)):
+                t.setdefault("save_safetensors", False)
 
 
 def build_sft_trainer(config: GlideConfig):

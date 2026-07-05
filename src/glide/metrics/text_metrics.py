@@ -89,14 +89,28 @@ def build_metric_fn(names: Sequence[str], *, normalize: bool = True):
     Returns:
         ``(predictions, references) -> dict[str, float]`` merging every metric.
     """
+    import inspect
+
     fns = [(name, metrics.get(name)) for name in names]
+
+    def _accepts_normalize(fn) -> bool:
+        try:
+            return "normalize" in inspect.signature(fn).parameters
+        except (TypeError, ValueError):
+            return False
 
     def _compute(predictions: Sequence[str], references: Sequence[str]) -> dict[str, float]:
         out: dict[str, float] = {}
         for name, fn in fns:
-            try:
-                out.update(fn(predictions, references, normalize=normalize))
-            except TypeError:
+            # BLEU must NOT be run through glide's lowercase/punct-strip normalizer:
+            # sacrebleu applies its own tokenization and normalized scores aren't
+            # comparable to published BLEU. Decide by signature inspection rather than
+            # an `except TypeError` retry, which would double-invoke a metric whose own
+            # body raised TypeError.
+            if _accepts_normalize(fn):
+                norm = False if name == "bleu" else normalize
+                out.update(fn(predictions, references, normalize=norm))
+            else:
                 out.update(fn(predictions, references))
         return out
 

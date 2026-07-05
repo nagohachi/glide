@@ -33,6 +33,9 @@ class SpeechLLM(nn.Module):
     def get_input_embeddings(self):
         return self.llm.get_input_embeddings()
 
+    def add_model_tags(self, *args, **kwargs):
+        """No-op: TRL tags ``PreTrainedModel``s; this composed nn.Module has nothing to tag."""
+
     def gradient_checkpointing_enable(self, **kwargs):
         """Delegate gradient checkpointing to the LLM (and the trainable encoder)."""
         if hasattr(self.llm, "gradient_checkpointing_enable"):
@@ -199,6 +202,14 @@ def build_speech_llm(config):
 
     speech = config.speech
     dtype = resolve_dtype(config.model.torch_dtype)
+    # torch_dtype: "auto" resolves to the string "auto"; encoder.to("auto") is a TypeError.
+    # Pick a concrete dtype for the composed path (encoder + LLM must agree anyway).
+    if dtype == "auto":
+        import torch
+
+        dtype = (torch.bfloat16
+                 if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+                 else torch.float32)
     enc_builder = audio_encoders.get(speech.encoder.name)
     encoder = enc_builder(speech.encoder, speech.sample_rate)
     # The AuT loads in fp32 by default; cast to the model dtype (bf16) so it matches the
@@ -211,6 +222,7 @@ def build_speech_llm(config):
         dtype=dtype,
         attn_implementation=config.model.attn_implementation,
         trust_remote_code=config.model.trust_remote_code,
+        **config.model.extra_kwargs,
     )
 
     proj_builder = projectors.get(speech.projector.name)
@@ -219,7 +231,10 @@ def build_speech_llm(config):
     # Tokenizer/special tokens come from the LLM; the <audio> marker is required.
     from transformers import AutoTokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(config.model.tokenizer_name or config.model.name)
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.model.tokenizer_name or config.model.name,
+        trust_remote_code=config.model.trust_remote_code,
+    )
     info = apply_special_tokens(tokenizer, llm, config.special_tokens)
     audio_id = info.audio_token_id
     if audio_id is None:
