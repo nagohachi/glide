@@ -137,9 +137,17 @@ class MultimodalSFTCollator:
     def _build_labels(self, batch) -> torch.Tensor:
         input_ids = batch["input_ids"]
         labels = input_ids.clone()
-        pad_id = self.tokenizer.pad_token_id
-        if pad_id is not None:
-            labels[input_ids == pad_id] = -100
+        # Mask padding by attention_mask (position-based), NOT by pad_token_id: when the
+        # base model has no pad token, pad_token falls back to eos_token, and masking by
+        # id would erase the genuine response-terminating EOS (the model never learns to
+        # stop). attention_mask==0 hits only real padding.
+        attention_mask = batch.get("attention_mask")
+        if attention_mask is not None:
+            labels[attention_mask == 0] = -100
+        else:
+            pad_id = self.tokenizer.pad_token_id
+            if pad_id is not None:
+                labels[input_ids == pad_id] = -100
 
         if self.completion_only and self.response_template_ids:
             rt = self.response_template_ids
