@@ -67,15 +67,23 @@ def _quantization_config(model_cfg):
     return BitsAndBytesConfig(load_in_8bit=True)
 
 
-def _load_processor(model_cfg, modality: Modality):
+def _load_processor(model_cfg, modality: Modality, vision_cfg=None):
     """Load an ``AutoProcessor`` for multimodal models, else an ``AutoTokenizer``."""
     import transformers
 
     name = model_cfg.tokenizer_name or model_cfg.name
     kwargs = {"trust_remote_code": model_cfg.trust_remote_code}
     if modality in (Modality.SPEECH, Modality.VISION):
+        proc_kwargs = dict(kwargs)
+        # Forward the image-processor pixel budget for the vision path (the schema
+        # advertises these as "passed to the image processor").
+        if modality is Modality.VISION and vision_cfg is not None:
+            if vision_cfg.max_pixels is not None:
+                proc_kwargs["max_pixels"] = vision_cfg.max_pixels
+            if vision_cfg.min_pixels is not None:
+                proc_kwargs["min_pixels"] = vision_cfg.min_pixels
         try:
-            return transformers.AutoProcessor.from_pretrained(name, **kwargs)
+            return transformers.AutoProcessor.from_pretrained(name, **proc_kwargs)
         except Exception:
             pass  # fall through to tokenizer (e.g. text-only speech-LLM)
     return transformers.AutoTokenizer.from_pretrained(name, **kwargs)
@@ -123,7 +131,7 @@ def load_model_and_processor(config: GlideConfig) -> LoadedModel:
     load_kwargs["config"] = hf_config
 
     model = auto_class.from_pretrained(model_cfg.name, **load_kwargs)
-    processor = _load_processor(model_cfg, config.modality)
+    processor = _load_processor(model_cfg, config.modality, config.vision)
 
     info = apply_special_tokens(processor, model, config.special_tokens)
     tokenizer = getattr(processor, "tokenizer", processor)

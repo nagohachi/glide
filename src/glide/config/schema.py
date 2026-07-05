@@ -6,9 +6,9 @@ path (e.g. ``--model.name Qwen/Qwen3-1.7B`` or ``--training.learning_rate 1e-5``
 
 The ``training`` section is intentionally a *free-form* dictionary rather than a
 dataclass: it is forwarded to the relevant TRL config object
-(:class:`trl.SFTConfig`, :class:`trl.GRPOConfig`, :class:`trl.PPOConfig`) so that
-every TRL/transformers ``TrainingArguments`` field is accepted without having to
-mirror hundreds of fields here. See :func:`glide.config.loader.build_training_args`.
+(:class:`trl.SFTConfig`, :class:`trl.GRPOConfig`) so that every TRL/transformers
+``TrainingArguments`` field is accepted without having to mirror hundreds of fields
+here. See :func:`glide.config.loader.build_training_args`.
 """
 
 import dataclasses
@@ -361,12 +361,10 @@ class RewardSpec:
 
 @dataclass
 class RLConfig:
-    """Reinforcement-learning settings (GRPO / GSPO / PPO)."""
+    """Reinforcement-learning settings (GRPO / GSPO)."""
 
     #: Reward functions (composed as a weighted sum). Required for GRPO/GSPO.
     rewards: list[RewardSpec] = field(default_factory=list)
-    #: Reward *model* path for PPO-style value/reward models (optional).
-    reward_model: str | None = None
     #: Use a vLLM rollout server for generation (``server`` / ``colocate``).
     use_vllm: bool = False
     vllm_mode: str = "server"
