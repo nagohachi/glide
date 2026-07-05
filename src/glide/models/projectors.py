@@ -9,6 +9,8 @@ Each entry in :data:`glide.registry.projectors` is a builder
 * ``qwen_omni_proj`` -- load Qwen2.5/Qwen3-Omni's pretrained audio projection.
 """
 
+from typing import Any
+
 import torch
 import torch.nn as nn
 
@@ -84,19 +86,66 @@ def build_mlp_gelu(cfg: ProjectorConfig, in_dim: int, out_dim: int):
     return proj
 
 
-def _load_state_into(proj: nn.Module, pretrained: str, key_filter: str) -> nn.Module:
-    """Best-effort load of a pretrained projector's weights by key substring."""
-    from safetensors.torch import load_file
+def _resolve_pretrained_file(pretrained: str) -> str:
+    """Resolve ``pretrained`` (local file, local dir, or HF hub id) to a weights file."""
     import os
 
-    path = pretrained
-    if os.path.isdir(pretrained):
-        cand = [f for f in os.listdir(pretrained) if f.endswith(".safetensors")]
-        path = os.path.join(pretrained, cand[0]) if cand else pretrained
+    if os.path.isfile(pretrained):
+        return pretrained
+    if not os.path.isdir(pretrained):
+        # Treat as an HF hub id and pull a local snapshot (schema documents "HF id / path").
+        from huggingface_hub import snapshot_download
+
+        pretrained = snapshot_download(pretrained, allow_patterns=["*.safetensors", "*.json"])
+    cand = sorted(f for f in os.listdir(pretrained) if f.endswith(".safetensors"))
+    if not cand:
+        raise FileNotFoundError(f"no .safetensors found under {pretrained!r}")
+    return os.path.join(pretrained, cand[0])
+
+
+def _load_state_into(
+    proj: nn.Module, pretrained: str, key_filter: str, key_map: dict[str, str] | None = None
+) -> nn.Module:
+    """Load a pretrained projector's weights by key substring, remapping to real names.
+
+    Checkpoint keys under ``key_filter`` (e.g. ``audio_tower.proj1.weight``) are stripped
+    to their tail (``proj1.weight``) and, via ``key_map``, remapped to the projector's own
+    parameter names (``net.0.weight``). Raises loudly if nothing usable was matched -- the
+    old code discarded ``load_state_dict``'s missing/unexpected results, so a total mismatch
+    silently trained from random init while the user believed weights were warm-started.
+    """
+    from safetensors.torch import load_file
+
+    path = _resolve_pretrained_file(pretrained)
     state = load_file(path)
-    sub = {k.split(key_filter, 1)[-1].lstrip("."): v for k, v in state.items() if key_filter in k}
+    sub: dict[str, Any] = {}
+    for k, v in state.items():
+        if key_filter not in k:
+            continue
+        tail = k.split(key_filter, 1)[-1].lstrip(".")
+        sub[(key_map or {}).get(tail, tail)] = v
+
     missing, unexpected = proj.load_state_dict(sub, strict=False)
+    loaded = [k for k in sub if k not in set(unexpected)]
+    if not loaded or missing:
+        raise RuntimeError(
+            f"pretrained projector load from {pretrained!r} matched "
+            f"{len(loaded)}/{len(proj.state_dict())} params "
+            f"(missing={list(missing)}, unexpected={list(unexpected)}). "
+            f"Projector expects keys {list(proj.state_dict())}; got source tails "
+            f"{[k.split(key_filter, 1)[-1].lstrip('.') for k in state if key_filter in k]}."
+        )
     return proj
+
+
+# Qwen audio-projector checkpoint tails -> MLPGeLUProjector param names.
+# net.0 = first Linear, net.1 = GELU, net.2 = second Linear.
+_QWEN_PROJ_KEY_MAP = {
+    "proj1.weight": "net.0.weight", "proj1.bias": "net.0.bias",
+    "proj2.weight": "net.2.weight", "proj2.bias": "net.2.bias",
+    "1.weight": "net.0.weight", "1.bias": "net.0.bias",
+    "2.weight": "net.2.weight", "2.bias": "net.2.bias",
+}
 
 
 @projectors.register("qwen3_asr_proj", exist_ok=True)
@@ -110,7 +159,8 @@ def build_qwen3_asr_proj(cfg: ProjectorConfig, in_dim: int, out_dim: int):
                             num_layers=2, downsample=cfg.downsample)
     if cfg.pretrained:
         try:
-            _load_state_into(proj, cfg.pretrained, key_filter="audio_tower.proj")
+            _load_state_into(proj, cfg.pretrained, key_filter="audio_tower.proj",
+                             key_map=_QWEN_PROJ_KEY_MAP)
         except Exception as exc:  # pragma: no cover - depends on checkpoint layout
             print(f"[glide] qwen3_asr_proj: could not load pretrained weights ({exc}); "
                   "using a freshly-initialized projector.")
@@ -127,7 +177,8 @@ def build_qwen_omni_proj(cfg: ProjectorConfig, in_dim: int, out_dim: int):
                             num_layers=2, downsample=cfg.downsample)
     if cfg.pretrained:
         try:
-            _load_state_into(proj, cfg.pretrained, key_filter="audio_tower.proj")
+            _load_state_into(proj, cfg.pretrained, key_filter="audio_tower.proj",
+                             key_map=_QWEN_PROJ_KEY_MAP)
         except Exception as exc:  # pragma: no cover
             print(f"[glide] qwen_omni_proj: could not load pretrained weights ({exc}); "
                   "using a freshly-initialized projector.")
