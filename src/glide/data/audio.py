@@ -66,6 +66,15 @@ def audio_num_samples(ref: Any, target_sr: int = 16000) -> int:
             if info.samplerate and info.samplerate != target_sr:
                 n = int(n * target_sr / info.samplerate)
             return n
-        except Exception:
-            pass
+        except Exception as exc:
+            # soundfile can't read some mp3/m4a/opus headers; the fallback FULLY decodes
+            # the file (slow, and pulls the whole signal into memory). Warn so a manifest
+            # of such files doesn't silently decode end-to-end during the length scan.
+            import warnings
+
+            warnings.warn(
+                f"audio_num_samples: soundfile.info failed for {ref!r} ({exc}); "
+                "falling back to a full decode (slow). Consider a data.duration_field.",
+                stacklevel=2,
+            )
     return int(len(load_audio(ref, target_sr)))
