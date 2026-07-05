@@ -130,20 +130,30 @@ class LocalRolloutBackend(RolloutBackend):
 
 # Rename map: training-side composed SpeechLLM param names -> the vLLM AuT server's
 # ``thinker.*`` names (the server's load_weights routes those through its mapper).
-# ``llm.lm_head.*`` is tied to embed_tokens -> skip (updating the embedding covers it).
 _GLIDE_TO_THINKER = (
     ("encoder.model.", "thinker.audio_tower."),
     ("llm.model.", "thinker.model."),
 )
 
 
-def _glide_to_thinker(name: str) -> str | None:
+def _glide_to_thinker(name: str, *, tie_word_embeddings: bool = True) -> str | None:
+    """Map a composed-SpeechLLM param name to its rollout-server name (or ``None``).
+
+    The projector and lm_head must NOT be silently dropped: a trainable projector
+    (``mlp_gelu`` is the schema default) diverges from the rollout policy otherwise,
+    and ``lm_head`` is only redundant with ``embed_tokens`` for *tied* LLMs.
+    """
     if name.startswith("llm.lm_head."):
-        return None
+        # Tied embeddings: pushing embed_tokens already covers lm_head. Untied: push it.
+        if tie_word_embeddings:
+            return None
+        return "thinker.lm_head." + name[len("llm.lm_head."):]
     for old, new in _GLIDE_TO_THINKER:
         if name.startswith(old):
             return new + name[len(old):]
-    return None  # projector / buffers etc. -> not served
+    if name.startswith("projector."):
+        return name  # served as-is (the composed projector is not part of thinker.*)
+    return None  # buffers etc. -> not served
 
 
 class VLLMRolloutBackend(RolloutBackend):
@@ -175,8 +185,15 @@ class VLLMRolloutBackend(RolloutBackend):
         ctx = self.ctx
         device = next(model.parameters()).device
         audio_field = ctx.collator.data.audio_field
+        prompt_field = ctx.collator.data.prompt_field
+        # Transmit the per-record prompt text and system prompt: the local collator bakes
+        # these into prompt_ids for the grad forward, so the rollout server must condition
+        # on the SAME context or completions/old_logps come from a different distribution
+        # (silently wrong importance ratios and rewards).
         resp = self._post("/rollout", {
             "audio_paths": [rec[audio_field] for rec in records],
+            "prompts": [rec.get(prompt_field, "") for rec in records],
+            "system_prompt": ctx.collator.template.system_prompt,
             "n": ctx.num_generations,
             "temperature": ctx.temperature,
             "top_p": ctx.top_p,
@@ -205,9 +222,10 @@ class VLLMRolloutBackend(RolloutBackend):
 
         from safetensors.torch import save_file
 
+        tie = bool(getattr(model.config, "tie_word_embeddings", True))
         sd = {}
         for name, p in model.named_parameters():
-            nk = _glide_to_thinker(name)
+            nk = _glide_to_thinker(name, tie_word_embeddings=tie)
             if nk is not None:
                 sd[nk] = p.detach().to(torch.bfloat16).cpu().contiguous()
         os.makedirs(os.path.dirname(self.sync_path) or ".", exist_ok=True)
@@ -254,6 +272,15 @@ class SpeechGSPOTrainer(transformers.Trainer):
         self._sequence_level = gconf.task is Task.GSPO
         self._extra_logs: dict[str, float] = {}
         super().__init__(**kwargs)
+        # v1 is single-GPU: _completion_logps calls model.logits_with_audio (a custom
+        # method) which DistributedDataParallel does not proxy -> AttributeError at step 1.
+        # Fail loudly with a fix instead of crashing cryptically.
+        if self.accelerator.num_processes > 1:
+            raise NotImplementedError(
+                "Speech GSPO/GRPO (rl_speech) is single-GPU only in v1: the grad forward "
+                "calls model.logits_with_audio on the DDP-wrapped model, which DDP does not "
+                "proxy. Pin distributed.nproc_per_node: 1 and run on a single visible GPU."
+            )
         self.add_callback(_SpeechRLCallback(self))
 
     # Inputs are raw record lists, not tensors -- skip the default device move.
@@ -315,7 +342,12 @@ class SpeechGSPOTrainer(transformers.Trainer):
         logits, sp_attn = model.logits_with_audio(
             input_ids=input_ids, attention_mask=attn, **audio_b
         )
-        logp = F.log_softmax(logits.float(), dim=-1)
+        # Divide logits by the sampling temperature before scoring: vLLM's old_logps come
+        # back at rl.temperature, so plain (T=1) log-softmax here biases the GSPO ratio
+        # exp(new-old) for any temperature != 1.0 (TRL applies the same scaling). For the
+        # local backend old_logp is None and both sides get this scaling -> ratio == 1.
+        temperature = self.backend.ctx.temperature or 1.0
+        logp = F.log_softmax(logits.float() / temperature, dim=-1)
 
         per: list[torch.Tensor] = []
         for i, c in enumerate(comps):
@@ -345,6 +377,13 @@ class SpeechGSPOTrainer(transformers.Trainer):
         for rec, item in zip(records, roll):
             comps = item["comps"]
             ref = rec.get(self.gconf.data.reference_field)
+            if ref is None:
+                raise ValueError(
+                    f"record is missing the reference field "
+                    f"{self.gconf.data.reference_field!r} (set data.reference_field to the "
+                    "field holding the target text). Without it the CER reward returns 0 for "
+                    "every completion, so all advantages are 0 and training silently no-ops."
+                )
             rewards = self._group_rewards([c["text"] for c in comps], ref)
             adv = self._advantages(rewards, rl.scale_rewards).to(
                 next(model.parameters()).device
