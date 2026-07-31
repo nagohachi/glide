@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from glide.config import GlideConfig, Modality, Task, load_config, version_output_dir
+from glide.trainers.common import build_reward_funcs, init_plugins
 from glide.config.loader import (
     apply_overrides,
     build_training_args,
@@ -135,6 +136,15 @@ def test_data_corpus_resolves_root(tmp_path):
     assert cfg.data.eval == "/abs/csj/a/dev.jsonl"
 
 
+def test_data_test_resolves_root(tmp_path):
+    (tmp_path / "run.yaml").write_text(
+        "data_roots:\n  csj: /abs/csj\n"
+        "data:\n  corpus: csj\n  test: a/test.jsonl\n"
+    )
+    cfg = load_config(tmp_path / "run.yaml")
+    assert cfg.data.test == "/abs/csj/a/test.jsonl"
+
+
 def test_data_corpus_unknown_raises(tmp_path):
     (tmp_path / "run.yaml").write_text(
         "data_roots:\n  csj: /abs/csj\n"
@@ -148,3 +158,15 @@ def test_data_root_explicit_still_works(tmp_path):
     (tmp_path / "run.yaml").write_text("data:\n  root: /abs/r\n  train: t.jsonl\n")
     cfg = load_config(tmp_path / "run.yaml")
     assert cfg.data.train == "/abs/r/t.jsonl"
+
+
+def test_build_reward_funcs_uses_reward_spec_names():
+    cfg = dict_to_dataclass(
+        GlideConfig,
+        {"rl": {"rewards": [{"name": "cer", "weight": 1.0}, {"name": "format", "weight": 1.0}]}},
+    )
+
+    init_plugins(cfg)
+
+    funcs, _weights = build_reward_funcs(cfg)
+    assert [fn.__name__ for fn in funcs] == ["cer", "format"]
