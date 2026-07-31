@@ -136,6 +136,15 @@ def test_data_corpus_resolves_root(tmp_path):
     assert cfg.data.eval == "/abs/csj/a/dev.jsonl"
 
 
+def test_data_test_resolves_root(tmp_path):
+    (tmp_path / "run.yaml").write_text(
+        "data_roots:\n  csj: /abs/csj\n"
+        "data:\n  corpus: csj\n  test: a/test.jsonl\n"
+    )
+    cfg = load_config(tmp_path / "run.yaml")
+    assert cfg.data.test == "/abs/csj/a/test.jsonl"
+
+
 def test_data_corpus_unknown_raises(tmp_path):
     (tmp_path / "run.yaml").write_text(
         "data_roots:\n  csj: /abs/csj\n"
