@@ -1,0 +1,63 @@
+# Qwen3-ASR SFT on CSJ (native_sft). Requires the transformers==4.57.6 env
+# (.venv-qwenasr). Run from the glide project root:
+#   UV_PROJECT_ENVIRONMENT=.venv-qwenasr uv run --no-sync glide sft \
+#       configs/examples/qwen3_asr_csj_sft.yaml
+# data_root.yaml (gitignored; copy from data_root.example.yaml) maps corpus -> root;
+# so paths below stay machine-independent.
+extends: [../data_root.yaml, ../base.yaml]
+
+task: sft
+modality: speech
+
+plugins: ["examples/src/qwen3_asr_plugin.py"]
+
+model:
+  name: Qwen/Qwen3-ASR-1.7B
+  auto_class: AutoModel          # registered by the plugin
+  attn_implementation: sdpa
+  torch_dtype: bfloat16
+  gradient_checkpointing: true
+
+data:
+  corpus: csj                     # selects data_roots[corpus] from data_root.yaml
+  train: native_sft/train.jsonl   # relative to the corpus root
+  eval: native_sft/dev.jsonl
+  audio_field: audio
+  response_field: text           # CSJ target transcript field
+  reference_field: text
+  lazy: true
+  # Smoke: cap samples; remove for the full run.
+  max_train_samples: 64
+  max_eval_samples: 16
+
+speech:
+  enabled: true
+  task: recognition
+  sample_rate: 16000
+  length_grouped_sampler: true       # similar-length batches, reshuffled per epoch
+  max_tokens_per_batch: 480000       # ~30s*16kHz audio budget -> dynamic batch size
+
+template:
+  collator: qwen3_asr                # custom prefix-masking collator (plugin)
+  system_prompt: ""                  # Qwen3-ASR uses an empty system prompt for ASR
+  train_on_completions_only: true
+  max_length: 4096
+
+eval:
+  generate:
+    enabled: false                   # enable after the smoke (AR decoding + CER/WER)
+  metrics: [cer, wer]
+
+logging:
+  report_to: [none]
+
+training:
+  output_dir: exp/qwen3_asr_csj_sft
+  max_steps: 5                       # smoke; switch to num_train_epochs for real runs
+  per_device_train_batch_size: 8     # acts as a hard cap on dynamic batch count
+  gradient_accumulation_steps: 1
+  learning_rate: 2.0e-5
+  logging_steps: 1
+  save_strategy: "no"
+  bf16: true
+  dataloader_num_workers: 2
