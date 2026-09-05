@@ -13,11 +13,11 @@ here. See :func:`glide.config.loader.build_training_args`.
 
 import dataclasses
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any, Literal
 
 
-class Task(str, Enum):
+class Task(StrEnum):
     """Supported post-training tasks (selected by the CLI subcommand)."""
 
     SFT = "sft"
@@ -25,7 +25,7 @@ class Task(str, Enum):
     GSPO = "gspo"
 
 
-class Modality(str, Enum):
+class Modality(StrEnum):
     """Input modality of the model being trained."""
 
     TEXT = "text"
@@ -33,7 +33,7 @@ class Modality(str, Enum):
     VISION = "vision"
 
 
-class SpeechTask(str, Enum):
+class SpeechTask(StrEnum):
     """Sub-task for the speech modality (controls validation metrics)."""
 
     RECOGNITION = "recognition"
