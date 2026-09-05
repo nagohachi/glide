@@ -81,15 +81,6 @@ def _run_training(config, task: str) -> int:
     return 0
 
 
-def _to_eval_device(model):
-    """Move a standalone eval/test model to CUDA when available (else leave on CPU)."""
-    import torch
-
-    if torch.cuda.is_available():
-        model.to("cuda")
-    return model
-
-
 def _run_generation_eval(
     config_path,
     overrides: list[str],
@@ -128,7 +119,11 @@ def _run_generation_eval(
     config.eval.generate.enabled = True
     init_plugins(config)
     loaded = load_model_and_processor(config)
-    _to_eval_device(loaded.model)
+
+    import torch
+
+    if torch.cuda.is_available():
+        loaded.model.to("cuda")
 
     paths = getattr(config.data, split)
     if paths is None:
