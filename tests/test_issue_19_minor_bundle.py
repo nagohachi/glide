@@ -18,7 +18,7 @@ def test_empty_section_hydrates_to_default():
     # A YAML `training:` with everything commented out parses to None.
     cfg = dict_to_dataclass(GlideConfig, {"training": None, "model": None})
     assert cfg.training == {}
-    assert isinstance(cfg.model.name, str)
+    assert isinstance(cfg.model.model_name_or_id, str)
 
 
 def test_sampler_global_length_sort_when_not_shuffling():

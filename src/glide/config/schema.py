@@ -2,7 +2,7 @@
 
 The configuration is a tree of small, composable dataclasses. Every field maps
 to a YAML key, and any field can be overridden on the command line with a dotted
-path (e.g. ``--model.name Qwen/Qwen3-1.7B`` or ``--training.learning_rate 1e-5``).
+path (e.g. ``--model.model_name_or_id Qwen/Qwen3-1.7B`` or ``--training.learning_rate 1e-5``).
 
 The ``training`` section is intentionally a *free-form* dictionary rather than a
 dataclass: it is forwarded to the relevant TRL config object
@@ -45,9 +45,9 @@ class ModelConfig:
     """How to load the base model, tokenizer and (multimodal) processor."""
 
     #: Required. HF hub id or local path; ``""`` means "not set".
-    name: str = ""
-    #: Defaults to the model path when unset.
-    tokenizer_name: str | None = None
+    model_name_or_id: str = ""
+    #: Defaults to ``model_name_or_id`` when unset.
+    tokenizer_name_or_id: str | None = None
     #: Required. ``flash_attention_2`` | ``sdpa`` | ``eager``. ``flash_attention_2``
     #: requires the ``flash-attn`` extra and a compatible GPU. ``""`` means "not set".
     attn_implementation: Literal["flash_attention_2", "sdpa", "eager", ""] = ""

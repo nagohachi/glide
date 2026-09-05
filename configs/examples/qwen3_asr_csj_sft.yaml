@@ -12,7 +12,7 @@ modality: speech
 plugins: ["examples/src/qwen3_asr_plugin.py"]
 
 model:
-  name: Qwen/Qwen3-ASR-1.7B
+  model_name_or_id: Qwen/Qwen3-ASR-1.7B
   auto_class: AutoModel          # registered by the plugin
   attn_implementation: sdpa
   torch_dtype: bfloat16

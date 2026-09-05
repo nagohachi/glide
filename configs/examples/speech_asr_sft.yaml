@@ -5,7 +5,7 @@ task: sft
 modality: speech
 
 model:
-  name: Qwen/Qwen3-ASR-1.7B
+  model_name_or_id: Qwen/Qwen3-ASR-1.7B
   attn_implementation: sdpa
   # For a model with a built-in audio tower, leave speech.encoder/projector null.
 

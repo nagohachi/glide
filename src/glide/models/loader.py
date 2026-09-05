@@ -71,7 +71,7 @@ def _load_processor(model_cfg, modality: Modality, vision_cfg=None):
     """Load an ``AutoProcessor`` for multimodal models, else an ``AutoTokenizer``."""
     import transformers
 
-    name = model_cfg.tokenizer_name or model_cfg.name
+    name = model_cfg.tokenizer_name_or_id or model_cfg.model_name_or_id
     kwargs = {"trust_remote_code": model_cfg.trust_remote_code}
     if modality in (Modality.SPEECH, Modality.VISION):
         proc_kwargs = dict(kwargs)
@@ -125,12 +125,12 @@ def load_model_and_processor(config: GlideConfig) -> LoadedModel:
     # top-level setting, leaving the text decoder on sdpa even when
     # flash_attention_2 is requested -- which silently breaks FA2 sequence packing.
     hf_config = transformers.AutoConfig.from_pretrained(
-        model_cfg.name, trust_remote_code=model_cfg.trust_remote_code
+        model_cfg.model_name_or_id, trust_remote_code=model_cfg.trust_remote_code
     )
     _propagate_attn_implementation(hf_config, model_cfg.attn_implementation)
     load_kwargs["config"] = hf_config
 
-    model = auto_class.from_pretrained(model_cfg.name, **load_kwargs)
+    model = auto_class.from_pretrained(model_cfg.model_name_or_id, **load_kwargs)
     processor = _load_processor(model_cfg, config.modality, config.vision)
 
     info = apply_special_tokens(processor, model, config.special_tokens)

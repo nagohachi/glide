@@ -7,7 +7,7 @@ modality: text     # text | speech | vision
 seed: 42
 
 model:
-  name: Qwen/Qwen3-1.7B
+  model_name_or_id: Qwen/Qwen3-1.7B
   attn_implementation: sdpa      # set flash_attention_2 with the flash-attn extra
   torch_dtype: bfloat16
   trust_remote_code: false

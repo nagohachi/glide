@@ -257,8 +257,8 @@ def _validate_required(config: GlideConfig) -> None:
         ValueError: listing every unset key, so one run surfaces all of them.
     """
     missing: list[str] = []
-    if not config.model.name:
-        missing.append("model.name (HF hub id or local path of the base model)")
+    if not config.model.model_name_or_id:
+        missing.append("model.model_name_or_id (HF hub id or local path of the base model)")
     if not config.model.attn_implementation:
         missing.append("model.attn_implementation (flash_attention_2 | sdpa | eager)")
     if config.peft.enabled:
