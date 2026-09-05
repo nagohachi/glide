@@ -1,0 +1,73 @@
+# Speech-in-the-loop GSPO (audio in the rollout). Run:
+#   glide gspo configs/examples/speech_gspo.yaml      # sequence-level IS (GSPO)
+#   glide grpo configs/examples/speech_gspo.yaml      # token-level IS (GRPO)
+#
+# Unlike text GRPO, the policy is a composed Speech-LLM (encoder + projector + LLM):
+# each rollout *consumes audio* and is scored with `1 - CER` vs the reference text.
+# Handled by glide.trainers.rl_speech.SpeechGSPOTrainer (not TRL's text GRPOTrainer).
+extends: ../base.yaml
+
+task: gspo
+modality: speech
+
+model:
+  name: Qwen/Qwen3-1.7B
+  attn_implementation: sdpa
+  torch_dtype: bfloat16
+  # Start the policy from a prior SFT checkpoint (composed-model state dict).
+  state_dict_path: /path/to/sft/checkpoint/pytorch_model.bin
+
+special_tokens:
+  audio_token: "<audio>"
+  additional: ["<audio>"]
+
+data:
+  # Records are just {audio, text} -- the model rolls out transcripts live; no
+  # precomputed hypotheses needed. `text` is both the SFT target field and the
+  # RL reference scored by the CER reward.
+  train: data/asr_rl_train.jsonl
+  audio_field: audio
+  response_field: text
+  reference_field: text
+
+speech:
+  enabled: true
+  task: recognition
+  sample_rate: 16000
+  encoder:
+    name: qwen3_asr_aut
+    pretrained: Qwen/Qwen3-ASR-1.7B
+  projector:
+    name: identity
+
+rl:
+  use_vllm: true                 # rollout via a vLLM server on a SEPARATE GPU
+  vllm_server_host: localhost
+  vllm_server_port: 8000
+  vllm_sync_every: 1             # push fresh policy weights to the server each step
+  num_generations: 8            # group size G
+  temperature: 1.0
+  top_p: 1.0
+  max_completion_length: 128
+  clip_eps: 0.2
+  kl_beta: 0.0                   # no reference model (set >0 to add a KL penalty)
+  scale_rewards: true
+  reference_key: text
+  rewards:
+    - name: cer                  # reward = 1 - CER(completion, reference)
+      weight: 1.0
+      kwargs: { reference_key: text }
+
+training:
+  output_dir: outputs/speech_gspo
+  learning_rate: 1.0e-6
+  per_device_train_batch_size: 2 # prompts per step (each expands to G rollouts)
+  gradient_accumulation_steps: 1
+  num_train_epochs: 1
+  logging_steps: 1
+  save_strategy: steps
+  save_steps: 50
+  bf16: true
+
+distributed:
+  nproc_per_node: 1              # train on 1 GPU; the vLLM server uses another

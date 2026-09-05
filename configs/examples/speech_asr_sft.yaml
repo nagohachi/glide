@@ -1,0 +1,53 @@
+# Speech recognition (ASR) SFT. Run: `glide sft configs/examples/speech_asr_sft.yaml`
+extends: ../base.yaml
+
+task: sft
+modality: speech
+
+model:
+  name: Qwen/Qwen3-ASR-1.7B
+  attn_implementation: sdpa
+  # For a model with a built-in audio tower, leave speech.encoder/projector null.
+
+special_tokens:
+  audio_token: "<audio>"
+  audio_pad_token: "<audio_pad>"
+  additional: ["<audio>", "<audio_pad>"]
+
+data:
+  # JSONL records, e.g.:
+  # {"audio": "/path/utt.wav", "messages": [...]}  or
+  # {"audio": "/path/utt.wav", "prompt": "Transcribe.", "response": "hello world", "reference": "hello world"}
+  train: data/asr_train.jsonl
+  eval: data/asr_eval.jsonl
+  audio_field: audio
+  reference_field: reference
+
+speech:
+  enabled: true
+  task: recognition
+  sample_rate: 16000
+  length_grouped_sampler: true       # similar-length batches; order varies per epoch
+  specaugment:
+    enabled: true
+
+template:
+  train_on_completions_only: true
+  response_template: "<|im_start|>assistant\n"   # used for completion-only masking
+
+# Autoregressive decoding + WER/CER at validation time.
+eval:
+  generate:
+    enabled: true
+    max_new_tokens: 256
+    batch_size: 8
+  metrics: [wer, cer]
+
+training:
+  output_dir: outputs/speech_asr_sft
+  num_train_epochs: 5
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 2
+  learning_rate: 2.0e-5
+  eval_strategy: steps
+  eval_steps: 500
