@@ -44,12 +44,13 @@ class SpeechTask(StrEnum):
 class ModelConfig:
     """How to load the base model, tokenizer and (multimodal) processor."""
 
-    name: str = "Qwen/Qwen3-1.7B"
+    #: Required. HF hub id or local path; ``""`` means "not set".
+    name: str = ""
     #: Defaults to the model path when unset.
     tokenizer_name: str | None = None
-    #: ``flash_attention_2`` | ``sdpa`` | ``eager``. ``flash_attention_2`` requires
-    #: the ``flash-attn`` extra and a compatible GPU.
-    attn_implementation: str = "sdpa"
+    #: Required. ``flash_attention_2`` | ``sdpa`` | ``eager``. ``flash_attention_2``
+    #: requires the ``flash-attn`` extra and a compatible GPU. ``""`` means "not set".
+    attn_implementation: Literal["flash_attention_2", "sdpa", "eager", ""] = ""
     #: ``bfloat16`` | ``float16`` | ``float32`` | ``auto``.
     torch_dtype: str = "bfloat16"
     trust_remote_code: bool = False
@@ -76,12 +77,14 @@ class PeftConfigSpec:
     """LoRA / PEFT settings. ``enabled=False`` performs full fine-tuning."""
 
     enabled: bool = False
-    r: int = 16
-    lora_alpha: int = 32
+    #: Required when ``enabled``. ``-1`` means "not set".
+    r: int = -1
+    lora_alpha: int = -1
     #: PEFT's own default. The LoRA paper reports 0.1 for its GLUE runs; 0.05 is
     #: the QLoRA convention, not an original-paper value.
     lora_dropout: float = 0.0
-    target_modules: list[str] | str = "all-linear"
+    #: Required when ``enabled``. ``None`` means "not set".
+    target_modules: list[str] | str | None = None
     modules_to_save: list[str] = field(default_factory=list)
     bias: Literal["none", "all", "lora_only"] = "none"
 
@@ -294,7 +297,8 @@ class ProjectorWarmupConfig:
     #: Length of the projector-only phase, in steps. ``0`` disables the schedule.
     projector_only_steps: int = 0
     #: Peak LR for the projector during phase 1 (also the optimizer base LR).
-    projector_lr: float = 1.0e-4
+    #: Required when ``projector_only_steps > 0``. ``-1`` means "not set".
+    projector_lr: float = -1.0
     #: Phase-2 LR-warmup length in steps; ``0`` -> ``warmup_ratio * (T - P)``.
     full_warmup_steps: int = 0
     #: Parameter-name substrings identifying the projector. Defaults cover the
