@@ -128,14 +128,19 @@ class SpecialTokensConfig:
 class DataConfig:
     """JSONL dataset locations and field mapping."""
 
-    #: Corpus name selecting an absolute root from the top-level ``data_roots`` map
-    #: (machine-specific; keep it in a gitignored ``data_root.yaml`` that runs
-    #: ``extends``, see ``configs/data_root.example.yaml``). Relative ``*_jsonl_path``
-    #: paths are resolved under that root.
-    corpus: str | None = None
-    #: Explicit absolute data root (alternative to ``corpus``); prepended to relative
-    #: ``*_jsonl_path`` values. ``corpus`` takes precedence when both are set.
-    root: str | None = None
+    #: The data root is prepended to every relative ``*_jsonl_path``. Give it
+    #: either way, never both -- ``root_key`` wins if you do:
+    #:
+    #: * ``root_key``: a key into the top-level ``data_roots`` map, so the machine
+    #:   -specific absolute path lives in a gitignored ``data_root.yaml`` pulled in
+    #:   via ``extends`` (see ``configs/data_root.example.yaml``). Use this when the
+    #:   same config runs on several machines.
+    #: * ``root_dir``: the absolute path written directly in this config. Use this
+    #:   for a one-off run where the indirection buys nothing.
+    #:
+    #: Leave both unset to treat every ``*_jsonl_path`` as already absolute.
+    root_key: str | None = None
+    root_dir: str | None = None
     #: Path(s) to training JSONL file(s) (relative to the data root unless absolute).
     train_jsonl_path: str | list[str] | None = None
     #: Path(s) to evaluation/validation JSONL file(s) (relative to the data root).
@@ -500,8 +505,8 @@ class GlideConfig:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     distributed: DistributedConfig = field(default_factory=DistributedConfig)
 
-    #: Machine-specific corpus name -> absolute data root map, selected by
-    #: ``data.corpus``. Keep in a gitignored ``data_root.yaml`` pulled in via
+    #: Machine-specific name -> absolute data root map, selected by
+    #: ``data.root_key``. Keep in a gitignored ``data_root.yaml`` pulled in via
     #: ``extends`` (see ``configs/data_root.example.yaml``).
     data_roots: dict[str, str] = field(default_factory=dict)
 

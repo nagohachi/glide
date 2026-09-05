@@ -1,6 +1,6 @@
 # Composed Speech-LLM SFT: pick an encoder + projector + text LLM independently.
 #   glide sft configs/examples/composed_speech_llm_sft.yaml
-# data_root.yaml (gitignored; copy from data_root.example.yaml) maps corpus -> root.
+# data_root.yaml (gitignored; copy from data_root.example.yaml) maps root_key -> absolute root.
 extends: [../data_root.yaml, ../base.yaml]
 
 task: sft
@@ -16,8 +16,8 @@ special_tokens:
   additional: ["<audio>"]
 
 data:
-  corpus: csj                     # selects data_roots[corpus] from data_root.yaml
-  train_jsonl_path: native_sft/train.jsonl       # relative to the corpus root
+  root_key: csj                     # selects data_roots[root_key] from data_root.yaml
+  train_jsonl_path: native_sft/train.jsonl       # relative to the data root
   eval_jsonl_path: native_sft/dev.jsonl
   audio_field: audio
   response_field: text

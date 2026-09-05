@@ -22,7 +22,7 @@ special_tokens:
   additional: ["<audio>"]
 
 data:
-  corpus: csj                    # data_roots[csj] from data_root.yaml
+  root_key: csj                    # data_roots[csj] from data_root.yaml
   train_jsonl_path: native_sft/train.jsonl  # records: {"audio": ..., "text": ...[, "think": ...]}
   eval_jsonl_path: native_sft/dev.jsonl
   audio_field: audio

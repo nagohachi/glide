@@ -1,6 +1,6 @@
-# Machine-specific corpus -> data-root map. Copy to data_root.yaml (gitignored)
-# and edit. Run configs select a corpus via `data.corpus` and add this to
-# `extends`:  extends: [data_root.yaml, base.yaml]   with  data: {corpus: csj}
+# Machine-specific name -> data-root map. Copy to data_root.yaml (gitignored)
+# and edit. Run configs select a root via `data.root_key` and add this to
+# `extends`:  extends: [data_root.yaml, base.yaml]   with  data: {root_key: csj}
 data_roots:
   csj: /path/to/csj
   cv25_ja: /path/to/cv25_ja
