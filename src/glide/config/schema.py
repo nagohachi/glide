@@ -161,8 +161,9 @@ class DataConfig:
     #: Cap the number of samples (debugging). ``None`` = all.
     max_train_samples: int | None = None
     max_eval_samples: int | None = None
-    #: Number of dataloader workers.
-    num_workers: int = 4
+    #: Dataloader worker processes. ``0`` loads in the main process (the PyTorch
+    #: default); >0 forks workers, which the lazy JSONL reader is fork-safe for.
+    num_workers: int = 0
 
 
 @dataclass
