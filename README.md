@@ -73,7 +73,7 @@ uv pip install -e /path/to/glide     # or: pip install -e, uv add, a regular ins
 
 # your custom code (plugins) lives in src/, your configs in configs/
 glide sft  configs/my_sft.yaml
-glide grpo configs/my_grpo.yaml --model.name Qwen/Qwen3-1.7B --training.learning_rate 1e-6
+glide grpo configs/my_grpo.yaml --model.model_name_or_id Qwen/Qwen3-1.7B --training.learning_rate 1e-6
 ```
 
 A common per-project pattern is to vendor it under `libs/` (e.g.

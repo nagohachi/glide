@@ -15,7 +15,7 @@ directory. Typical usage from a project::
     uv pip install -e /path/to/glide   # or pip install -e, uv add, ...
 
     glide sft   configs/my_sft.yaml
-    glide grpo  configs/my_grpo.yaml --model.name Qwen/Qwen3-1.7B
+    glide grpo  configs/my_grpo.yaml --model.model_name_or_id Qwen/Qwen3-1.7B
 
 Module overview
 ---------------

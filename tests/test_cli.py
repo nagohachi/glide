@@ -9,10 +9,10 @@ def test_parser_has_all_commands():
     parser = _build_parser()
     # Parse each training command with a config + an override (override -> unknown).
     for cmd in _TRAIN_TASKS:
-        args, overrides = parser.parse_known_args([cmd, "cfg.yaml", "--model.name", "x"])
+        args, overrides = parser.parse_known_args([cmd, "cfg.yaml", "--model.model_name_or_id", "x"])
         assert args.command == cmd
         assert args.config == "cfg.yaml"
-        assert overrides == ["--model.name", "x"]
+        assert overrides == ["--model.model_name_or_id", "x"]
 
 
 def test_eval_and_docs_commands():

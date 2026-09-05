@@ -12,7 +12,7 @@ task: sft
 modality: speech
 
 model:
-  name: Qwen/Qwen3-1.7B          # the text LLM (thinking-capable)
+  model_name_or_id: Qwen/Qwen3-1.7B          # the text LLM (thinking-capable)
   attn_implementation: sdpa
   torch_dtype: bfloat16
   gradient_checkpointing: true

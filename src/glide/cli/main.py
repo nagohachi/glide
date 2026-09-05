@@ -11,7 +11,7 @@ Commands
 
 Any argument after the optional config path is treated as a dotted override, e.g.::
 
-    glide sft configs/asr_sft.yaml --model.name Qwen/Qwen3-ASR-1.7B --training.learning_rate 1e-5
+    glide sft configs/asr_sft.yaml --model.model_name_or_id Qwen/Qwen3-ASR-1.7B --training.learning_rate 1e-5
 
 Each command is a :class:`Command` subclass that owns both its argparse flags
 and its execution, registered in :data:`COMMANDS`. Adding a command means adding
@@ -205,7 +205,7 @@ class _GenerationCommand(_ConfigCommand):
             "--checkpoint",
             "-c",
             default=None,
-            help="Model checkpoint path or HF hub id (overrides model.name).",
+            help="Model checkpoint path or HF hub id (overrides model.model_name_or_id).",
         )
 
     def run(self, args: argparse.Namespace, overrides: list[str], argv: list[str]) -> int:
@@ -232,7 +232,7 @@ class _GenerationCommand(_ConfigCommand):
         from ..trainers.common import init_plugins
 
         if checkpoint:
-            overrides = [*overrides, f"--model.name={checkpoint}"]
+            overrides = [*overrides, f"--model.model_name_or_id={checkpoint}"]
         config = load_config(config_path, overrides, task="sft")
         config.eval.generate.enabled = True
         init_plugins(config)
