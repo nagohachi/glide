@@ -127,7 +127,12 @@ class ComposedSpeechCollator:
             for r in records
         ]
 
-        enc = self.tokenizer(texts, return_tensors="pt", padding=True)
+        # add_special_tokens=False: the chat template already renders every special
+        # token (incl. BOS for Llama/Gemma). Letting the tokenizer add another BOS
+        # here would (a) double-BOS the sequence, (b) shift it one token past the
+        # add_special_tokens=False prefix_lens (masking the last prompt token as a
+        # target), and (c) diverge from generation_inputs (also add_special_tokens=False).
+        enc = self.tokenizer(texts, return_tensors="pt", padding=True, add_special_tokens=False)
         batch = {"input_ids": enc["input_ids"], "attention_mask": enc["attention_mask"]}
         batch["labels"] = self._labels(enc["input_ids"], prefix_lens)
 
