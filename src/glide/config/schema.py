@@ -148,6 +148,12 @@ class DataConfig:
     #: For speech/vision: the field holding the media path / array.
     audio_field: str = "audio"
     image_field: str = "image"
+    #: Optional per-record fields carrying the audio length for the length-grouped
+    #: sampler, avoiding a filesystem header read per utterance. ``duration_field`` is
+    #: in seconds (multiplied by ``speech.sample_rate``); ``num_samples_field`` is the
+    #: raw sample count. Either, when present on a record, is used verbatim.
+    duration_field: str | None = None
+    num_samples_field: str | None = None
     #: Optional reference text field used by validation metrics (WER/CER/BLEU).
     reference_field: str = "reference"
     #: Field holding the assistant reasoning/CoT for thinking-mode SFT. When present
