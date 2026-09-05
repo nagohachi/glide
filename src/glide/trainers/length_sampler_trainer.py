@@ -86,6 +86,15 @@ class LengthGroupedSFTTrainer(SFTTrainer):
         self._glide_composed = glide_composed
         self._glide_batch_sampler = None
         super().__init__(*args, **kwargs)
+        # SpeechLLM.forward has a **kwargs signature, so HF Trainer sets
+        # model_accepts_loss_kwargs=True and (a) skips the loss/gradient_accumulation
+        # division in training_step and (b) multiplies by num_processes under DDP -- but
+        # the inner LLM returns a *mean* CE loss, not a sum normalized by num_items, so
+        # gradients end up ~GA*(N) too large. Force it off for the composed path (HF's own
+        # docstring recommends this for mean-loss models). The built-in-tower path keeps
+        # the default: those are real HF models that consume num_items_in_batch correctly.
+        if self._glide_composed:
+            self.model_accepts_loss_kwargs = False
         if glide_lengths is not None:
             # Stripe across ranks IN the sampler (ESPnet-style): each rank gets an
             # equal number of batches every epoch (the sampler truncates to a multiple
