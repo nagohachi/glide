@@ -456,6 +456,16 @@ def _mean(xs) -> float:
 def build_speech_rl_trainer(config: GlideConfig) -> SpeechGSPOTrainer:
     """Assemble a :class:`SpeechGSPOTrainer` from ``config`` (called by ``build_rl_trainer``)."""
     init_plugins(config)
+    if config.peft.enabled:
+        # rl.py wires peft only for the text GRPO path; the composed speech loop would
+        # otherwise silently full-fine-tune. LoRA here would also break weight-sync
+        # (_glide_to_thinker maps base names, not adapter names), so fail loudly.
+        raise NotImplementedError(
+            "peft.enabled is not supported by the speech GSPO/GRPO loop (rl_speech): "
+            "LoRA adapter param names would not map through the vLLM weight-sync. Run "
+            "speech RL with peft.enabled=false (full fine-tuning), or use PEFT via the SFT "
+            "path and start RL from the merged checkpoint."
+        )
     loaded = load_model_and_processor(config)
     reward_funcs, reward_weights = build_reward_funcs(config)
     if not reward_funcs:
