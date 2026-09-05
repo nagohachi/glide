@@ -90,38 +90,32 @@ def _to_eval_device(model):
     return model
 
 
-def _run_eval(config_path, overrides: list[str], checkpoint: str | None = None) -> int:
-    from ..config.loader import load_config
-    from ..data.jsonl import read_jsonl
-    from ..eval.generate import GenerationEvaluator
-    from ..models.loader import load_model_and_processor
-    from ..trainers.common import init_plugins
-
-    if checkpoint:
-        overrides = [*overrides, f"--model.name={checkpoint}"]
-    config = load_config(config_path, overrides, task="sft")
-    config.eval.generate.enabled = True
-    init_plugins(config)
-    loaded = load_model_and_processor(config)
-    _to_eval_device(loaded.model)
-
-    if config.data.eval is None:
-        print("[glide] no data.eval configured; nothing to evaluate.", file=sys.stderr)
-        return 1
-    paths = config.data.eval if isinstance(config.data.eval, list) else [config.data.eval]
-    records = []
-    for p in paths:
-        records.extend(read_jsonl(p))
-
-    evaluator = GenerationEvaluator(config, loaded.processor, records)
-    metrics = evaluator.evaluate(loaded.model)
-    print("[glide][eval]", metrics)
-    return 0
-
-
-def _run_test(
-    config_path, overrides: list[str], checkpoint: str | None = None, output: str | None = None
+def _run_generation_eval(
+    config_path,
+    overrides: list[str],
+    *,
+    split: str,
+    checkpoint: str | None = None,
+    output: str | None = None,
 ) -> int:
+    """Load a checkpoint and score one data split by autoregressive decoding.
+
+    ``eval`` and ``test`` differ only in which split they read and how much of it
+    they score; everything else (config load, plugin init, model load, decoding)
+    is identical.
+
+    Args:
+        config_path: Path to the run YAML.
+        overrides: Dotted ``--key value`` overrides left over from argparse.
+        split: ``"eval"`` scores ``data.eval`` and honours
+            ``eval.generate.max_eval_samples``; ``"test"`` scores all of
+            ``data.test``, uncapped.
+        checkpoint: Overrides ``model.name`` when given.
+        output: Save per-sample predictions to this JSONL path.
+
+    Returns:
+        ``0`` on success, ``1`` if the split is not configured.
+    """
     from ..config.loader import load_config
     from ..data.jsonl import read_jsonl
     from ..eval.generate import GenerationEvaluator
@@ -136,18 +130,22 @@ def _run_test(
     loaded = load_model_and_processor(config)
     _to_eval_device(loaded.model)
 
-    if config.data.test is None:
-        print("[glide] no data.test configured; nothing to evaluate.", file=sys.stderr)
+    paths = getattr(config.data, split)
+    if paths is None:
+        print(f"[glide] no data.{split} configured; nothing to evaluate.", file=sys.stderr)
         return 1
-    paths = config.data.test if isinstance(config.data.test, list) else [config.data.test]
+    if not isinstance(paths, list):
+        paths = [paths]
     records = []
-    for p in paths:
-        records.extend(read_jsonl(p))
+    for path in paths:
+        records.extend(read_jsonl(path))
 
-    # Test evaluation always scores the full set; max_eval_samples only caps validation.
-    evaluator = GenerationEvaluator(config, loaded.processor, records, cap_samples=False)
-    metrics = evaluator.evaluate(loaded.model, save_path=output, prefix="test")
-    print("[glide][test]", metrics)
+    # Test scores the full set; max_eval_samples only caps validation.
+    evaluator = GenerationEvaluator(
+        config, loaded.processor, records, cap_samples=(split == "eval")
+    )
+    metrics = evaluator.evaluate(loaded.model, save_path=output, prefix=split)
+    print(f"[glide][{split}]", metrics)
     return 0
 
 
@@ -285,9 +283,13 @@ def main(argv: list[str] | None = None) -> int:
                 return _relaunch_distributed(argv, config.distributed, nproc)
         return _run_training(config, args.command)
     if args.command == "eval":
-        return _run_eval(args.config, overrides, args.checkpoint)
+        return _run_generation_eval(
+            args.config, overrides, split="eval", checkpoint=args.checkpoint
+        )
     if args.command == "test":
-        return _run_test(args.config, overrides, args.checkpoint, args.output)
+        return _run_generation_eval(
+            args.config, overrides, split="test", checkpoint=args.checkpoint, output=args.output
+        )
     if args.command == "docs":
         return _run_docs(args.output, args.serve)
     parser.error(f"Unknown command: {args.command}")
