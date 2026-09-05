@@ -11,8 +11,8 @@ model:
 data:
   # Records need a prompt and any columns reward functions consume, e.g.:
   # {"prompt": "...", "reference": "..."}
-  train: data/rl_train.jsonl
-  eval: data/rl_eval.jsonl
+  train_jsonl_path: data/rl_train.jsonl
+  eval_jsonl_path: data/rl_eval.jsonl
 
 rl:
   rewards:

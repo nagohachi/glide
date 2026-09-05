@@ -130,8 +130,9 @@ def build_sft_trainer(config: GlideConfig):
 
     callbacks = []
     eval_records = None
-    if config.eval.generate.enabled and config.data.eval is not None:
-        paths = config.data.eval if isinstance(config.data.eval, list) else [config.data.eval]
+    if config.eval.generate.enabled and config.data.eval_jsonl_path is not None:
+        paths = (config.data.eval_jsonl_path if isinstance(config.data.eval_jsonl_path, list)
+                 else [config.data.eval_jsonl_path])
         eval_records = []
         for p in paths:
             eval_records.extend(read_jsonl(p))

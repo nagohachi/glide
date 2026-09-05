@@ -43,12 +43,13 @@ def maybe_generation_callback(config: GlideConfig, processor, eval_records):
 
 
 def maybe_test_callback(config: GlideConfig, processor):
-    """Build a :class:`TestEvalCallback` from ``data.test`` if configured."""
-    if not config.eval.generate.enabled or config.data.test is None:
+    """Build a :class:`TestEvalCallback` from ``data.test_jsonl_path`` if configured."""
+    if not config.eval.generate.enabled or config.data.test_jsonl_path is None:
         return None
     from ..data.jsonl import read_jsonl
 
-    paths = config.data.test if isinstance(config.data.test, list) else [config.data.test]
+    paths = (config.data.test_jsonl_path if isinstance(config.data.test_jsonl_path, list)
+             else [config.data.test_jsonl_path])
     test_records = []
     for p in paths:
         test_records.extend(read_jsonl(p))

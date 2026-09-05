@@ -284,7 +284,7 @@ def _validate_required(config: GlideConfig) -> None:
 
 
 def _resolve_data_paths(config: GlideConfig) -> None:
-    """Prepend the corpus root to relative ``train``/``eval`` paths (in place).
+    """Prepend the data root to relative ``*_jsonl_path`` values (in place).
 
     The root is ``data_roots[data.corpus]`` when ``data.corpus`` is set, else the
     explicit ``data.root``.
@@ -308,9 +308,9 @@ def _resolve_data_paths(config: GlideConfig) -> None:
             return [_join(x) for x in p]
         return p if os.path.isabs(p) else os.path.join(root, p)
 
-    config.data.train = _join(config.data.train)
-    config.data.eval = _join(config.data.eval)
-    config.data.test = _join(config.data.test)
+    config.data.train_jsonl_path = _join(config.data.train_jsonl_path)
+    config.data.eval_jsonl_path = _join(config.data.eval_jsonl_path)
+    config.data.test_jsonl_path = _join(config.data.test_jsonl_path)
 
 
 # --------------------------------------------------------------------------- #

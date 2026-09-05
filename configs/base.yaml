@@ -26,8 +26,8 @@ special_tokens:
   pad_to_multiple_of: 8
 
 data:
-  train: null
-  eval: null
+  train_jsonl_path: null
+  eval_jsonl_path: null
   lazy: true
   num_workers: 0
 

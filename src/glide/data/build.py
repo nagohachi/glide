@@ -95,7 +95,7 @@ def _lengths_from_manifest(dataset: JsonlDataset, config: GlideConfig) -> list[i
 
 
 def _manifest_paths(config: GlideConfig) -> list[str]:
-    p = config.data.train
+    p = config.data.train_jsonl_path
     if p is None:
         return []
     return [str(x) for x in (p if isinstance(p, list) else [p])]

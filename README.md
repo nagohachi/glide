@@ -93,8 +93,8 @@ as `glide_config.yaml`.
 glide sft   [config.yaml] [--dotted.key value ...]   # supervised fine-tuning
 glide grpo  [config.yaml] ...                         # GRPO
 glide gspo  [config.yaml] ...                         # GSPO (sequence-level IS)
-glide eval  [config.yaml] [-c checkpoint] ...         # AR-decoding eval on data.eval
-glide test  [config.yaml] [-c checkpoint] [-o preds.jsonl]  # held-out test on data.test
+glide eval  [config.yaml] [-c checkpoint] ...         # AR-decoding eval on data.eval_jsonl_path
+glide test  [config.yaml] [-c checkpoint] [-o preds.jsonl]  # held-out test on data.test_jsonl_path
 glide docs  [-o docs/api] [--serve]                   # API docs from docstrings
 ```
 
@@ -192,7 +192,7 @@ custom multimodal components.
 
 ### During training
 
-Set `data.eval` and `eval.generate.enabled: true` to run autoregressive decoding
+Set `data.eval_jsonl_path` and `eval.generate.enabled: true` to run autoregressive decoding
 at each evaluation step. Metrics are logged to the trainer (stdout, wandb, tensorboard)
 and per-sample predictions are saved to `{output_dir}/eval_predictions.jsonl`
 (overwritten each run so only the latest checkpoint's output is kept):
@@ -213,7 +213,7 @@ eval:
   normalize_text: true
 ```
 
-At the end of training, `data.test` is evaluated once and saved to
+At the end of training, `data.test_jsonl_path` is evaluated once and saved to
 `{output_dir}/test_predictions.jsonl` with `test_*` metric keys.
 
 ### Standalone evaluation
@@ -237,7 +237,7 @@ Both commands accept any `--dotted.key value` override, so you can point at a
 different test file without editing the YAML:
 
 ```bash
-glide test configs/my_sft.yaml -c path/to/checkpoint --data.test other_test.jsonl
+glide test configs/my_sft.yaml -c path/to/checkpoint --data.test_jsonl_path other_test.jsonl
 ```
 
 ---

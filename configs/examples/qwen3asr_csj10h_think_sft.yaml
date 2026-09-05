@@ -5,8 +5,8 @@
 extends: [qwen3asr_csj10h_base.yaml]
 
 data:
-  train: native_think_phone_nospace_10h/train.jsonl   # 10h think subset
-  eval: native_think_phone_nospace/dev.jsonl
+  train_jsonl_path: native_think_phone_nospace_10h/train.jsonl   # 10h think subset
+  eval_jsonl_path: native_think_phone_nospace/dev.jsonl
   # No reasoning_field: the <think> block is embedded in `text`, rendered verbatim.
 
 template:

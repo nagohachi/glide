@@ -6,7 +6,7 @@ Commands
 ``grpo``  Group Relative Policy Optimization.
 ``gspo``  Group Sequence Policy Optimization (GRPO with sequence-level IS).
 ``eval``  Validation-time autoregressive decoding + metrics on a checkpoint.
-``test``  Held-out test evaluation on ``data.test`` at the end of training.
+``test``  Held-out test evaluation on ``data.test_jsonl_path`` at the end of training.
 ``docs``  Generate API documentation from source + docstrings (pdoc).
 
 Any argument after the optional config path is treated as a dotted override, e.g.::
@@ -243,10 +243,10 @@ class _GenerationCommand(_ConfigCommand):
         if torch.cuda.is_available():
             loaded.model.to("cuda")
 
-        paths = getattr(config.data, self.split)
+        paths = getattr(config.data, f"{self.split}_jsonl_path")
         if paths is None:
             print(
-                f"[glide] no data.{self.split} configured; nothing to evaluate.",
+                f"[glide] no data.{self.split}_jsonl_path configured; nothing to evaluate.",
                 file=sys.stderr,
             )
             return 1
@@ -266,7 +266,7 @@ class _GenerationCommand(_ConfigCommand):
 
 
 class EvalCommand(_GenerationCommand):
-    """Validation decoding + metrics over ``data.eval`` (capped by max_eval_samples)."""
+    """Validation decoding + metrics over ``data.eval_jsonl_path`` (capped by max_eval_samples)."""
 
     name = "eval"
     help = "Run AR-decoding evaluation + metrics."
@@ -274,10 +274,10 @@ class EvalCommand(_GenerationCommand):
 
 
 class TestCommand(_GenerationCommand):
-    """Held-out decoding + metrics over all of ``data.test`` (never capped)."""
+    """Held-out decoding + metrics over all of ``data.test_jsonl_path`` (never capped)."""
 
     name = "test"
-    help = "Run held-out test evaluation on data.test."
+    help = "Run held-out test evaluation on data.test_jsonl_path."
     split = "test"
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
