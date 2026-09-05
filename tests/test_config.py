@@ -132,17 +132,17 @@ def test_data_corpus_resolves_root(tmp_path):
     (tmp_path / "run.yaml").write_text(
         "model:\n  model_name_or_id: m\n  attn_implementation: sdpa\n"
         "data_roots:\n  csj: /abs/csj\n  cv: /abs/cv\n"
-        "data:\n  corpus: csj\n  train: a/train.jsonl\n  eval: a/dev.jsonl\n"
+        "data:\n  corpus: csj\n  train_jsonl_path: a/train.jsonl\n  eval_jsonl_path: a/dev.jsonl\n"
     )
     cfg = load_config(tmp_path / "run.yaml")
-    assert cfg.data.train == "/abs/csj/a/train.jsonl"
-    assert cfg.data.eval == "/abs/csj/a/dev.jsonl"
+    assert cfg.data.train_jsonl_path == "/abs/csj/a/train.jsonl"
+    assert cfg.data.eval_jsonl_path == "/abs/csj/a/dev.jsonl"
 
 
 def test_data_corpus_unknown_raises(tmp_path):
     (tmp_path / "run.yaml").write_text(
         "data_roots:\n  csj: /abs/csj\n"
-        "data:\n  corpus: missing\n  train: t.jsonl\n"
+        "data:\n  corpus: missing\n  train_jsonl_path: t.jsonl\n"
     )
     with pytest.raises(ValueError, match="not found in data_roots"):
         load_config(tmp_path / "run.yaml")
@@ -150,10 +150,10 @@ def test_data_corpus_unknown_raises(tmp_path):
 
 def test_data_root_explicit_still_works(tmp_path):
     (tmp_path / "run.yaml").write_text(
-        "model:\n  model_name_or_id: m\n  attn_implementation: sdpa\n" "data:\n  root: /abs/r\n  train: t.jsonl\n"
+        "model:\n  model_name_or_id: m\n  attn_implementation: sdpa\n" "data:\n  root: /abs/r\n  train_jsonl_path: t.jsonl\n"
     )
     cfg = load_config(tmp_path / "run.yaml")
-    assert cfg.data.train == "/abs/r/t.jsonl"
+    assert cfg.data.train_jsonl_path == "/abs/r/t.jsonl"
 
 
 def test_missing_required_fields_raise(tmp_path):

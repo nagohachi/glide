@@ -18,7 +18,7 @@ def test_compute_audio_lengths_from_manifest(tmp_path):
     ds = JsonlDataset(str(path), lazy=True)
     cfg = GlideConfig()
     cfg.modality = Modality.SPEECH
-    cfg.data.train = str(path)
+    cfg.data.train_jsonl_path = str(path)
     cfg.data.duration_field = "duration"
     cfg.speech.sample_rate = 16000
     # No file access (the audio paths don't exist) -> proves it read the manifest.

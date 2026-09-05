@@ -130,18 +130,18 @@ class DataConfig:
 
     #: Corpus name selecting an absolute root from the top-level ``data_roots`` map
     #: (machine-specific; keep it in a gitignored ``data_root.yaml`` that runs
-    #: ``extends``, see ``configs/data_root.example.yaml``). Relative ``train``/``eval``
+    #: ``extends``, see ``configs/data_root.example.yaml``). Relative ``*_jsonl_path``
     #: paths are resolved under that root.
     corpus: str | None = None
     #: Explicit absolute data root (alternative to ``corpus``); prepended to relative
-    #: ``train``/``eval`` paths. ``corpus`` takes precedence when both are set.
+    #: ``*_jsonl_path`` values. ``corpus`` takes precedence when both are set.
     root: str | None = None
-    #: Path(s) to training JSONL file(s) (relative to the corpus root unless absolute).
-    train: str | list[str] | None = None
-    #: Path(s) to evaluation/validation JSONL file(s) (relative to the corpus root).
-    eval: str | list[str] | None = None
+    #: Path(s) to training JSONL file(s) (relative to the data root unless absolute).
+    train_jsonl_path: str | list[str] | None = None
+    #: Path(s) to evaluation/validation JSONL file(s) (relative to the data root).
+    eval_jsonl_path: str | list[str] | None = None
     #: Path(s) to held-out test JSONL file(s) evaluated once at the end of training.
-    test: str | list[str] | None = None
+    test_jsonl_path: str | list[str] | None = None
     #: Read records lazily by byte offset instead of loading into memory.
     lazy: bool = True
     #: Field names in each JSONL record.

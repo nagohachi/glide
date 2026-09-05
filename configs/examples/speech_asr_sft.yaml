@@ -18,8 +18,8 @@ data:
   # JSONL records, e.g.:
   # {"audio": "/path/utt.wav", "messages": [...]}  or
   # {"audio": "/path/utt.wav", "prompt": "Transcribe.", "response": "hello world", "reference": "hello world"}
-  train: data/asr_train.jsonl
-  eval: data/asr_eval.jsonl
+  train_jsonl_path: data/asr_train.jsonl
+  eval_jsonl_path: data/asr_eval.jsonl
   audio_field: audio
   reference_field: reference
 

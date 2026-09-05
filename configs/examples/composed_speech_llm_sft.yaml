@@ -17,8 +17,8 @@ special_tokens:
 
 data:
   corpus: csj                     # selects data_roots[corpus] from data_root.yaml
-  train: native_sft/train.jsonl       # relative to the corpus root
-  eval: native_sft/dev.jsonl
+  train_jsonl_path: native_sft/train.jsonl       # relative to the corpus root
+  eval_jsonl_path: native_sft/dev.jsonl
   audio_field: audio
   response_field: text
   reference_field: text
