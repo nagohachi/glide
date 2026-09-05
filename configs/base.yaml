@@ -1,0 +1,77 @@
+# Base configuration for glide. Run-specific configs `extends: base.yaml` and
+# override only what differs. CLI flags (`--training.learning_rate 1e-5`) override
+# everything. Every key maps 1:1 to the dataclasses in glide.config.schema.
+
+task: sft          # sft | grpo | gspo  (the CLI subcommand wins)
+modality: text     # text | speech | vision
+seed: 42
+
+model:
+  name: Qwen/Qwen3-1.7B
+  attn_implementation: sdpa      # set flash_attention_2 with the flash-attn extra
+  torch_dtype: bfloat16
+  trust_remote_code: false
+  gradient_checkpointing: true
+
+peft:
+  enabled: false                 # true -> LoRA; false -> full fine-tuning
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: all-linear
+
+special_tokens:
+  additional: []
+  resize_embeddings: true
+  pad_to_multiple_of: 8
+
+data:
+  train: null
+  eval: null
+  lazy: true
+  num_workers: 4
+
+template:
+  train_on_completions_only: true
+  add_generation_prompt: true
+  max_length: 2048
+
+packing:
+  enabled: false
+  strategy: ffd
+
+eval:
+  generate:
+    enabled: false
+    max_new_tokens: 256
+    batch_size: 8
+  metrics: []
+  normalize_text: true
+
+# Multi-GPU / multi-node launch (driven from YAML, not env vars). `glide <task>`
+# self-launches under torch.distributed.run when nproc_per_node resolves to > 1.
+distributed:
+  nproc_per_node: null     # null = auto = all visible GPUs; or set an integer
+  nnodes: 1
+  node_rank: 0
+  master_addr: null        # set for multi-node
+  master_port: null
+
+logging:
+  report_to: [tensorboard]
+  project: glide
+
+# Forwarded verbatim to the TRL config (SFTConfig / GRPOConfig). `output_dir` is
+# versioned to `output_dir/v{N}-{datetime}` at run start (disable with no_version).
+training:
+  output_dir: outputs/glide
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 2.0e-5
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  logging_steps: 10
+  save_steps: 500
+  save_total_limit: 3
+  bf16: true

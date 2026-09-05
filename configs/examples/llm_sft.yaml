@@ -1,0 +1,31 @@
+# LLM SFT example. Run: `glide sft configs/examples/llm_sft.yaml`
+extends: ../base.yaml
+
+task: sft
+modality: text
+
+model:
+  name: Qwen/Qwen3-1.7B
+
+data:
+  train: data/train.jsonl      # records: {"messages": [...]} or {"prompt","response"}
+  eval: data/eval.jsonl
+
+template:
+  train_on_completions_only: true
+  max_length: 4096
+
+packing:
+  enabled: true
+  strategy: ffd
+
+logging:
+  report_to: [wandb, tensorboard]
+  project: glide-llm-sft
+
+training:
+  output_dir: outputs/llm_sft
+  num_train_epochs: 3
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 8
+  learning_rate: 1.0e-5

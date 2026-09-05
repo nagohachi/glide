@@ -1,0 +1,31 @@
+# LLM GRPO example. Run: `glide grpo configs/examples/llm_grpo.yaml`
+# For GSPO, run the same config with `glide gspo ...` (sequence-level IS).
+extends: ../base.yaml
+
+task: grpo
+modality: text
+
+model:
+  name: Qwen/Qwen3-1.7B
+
+data:
+  # Records need a prompt and any columns reward functions consume, e.g.:
+  # {"prompt": "...", "reference": "..."}
+  train: data/rl_train.jsonl
+  eval: data/rl_eval.jsonl
+
+rl:
+  rewards:
+    - name: format            # reward a <think>...</think> block
+      weight: 0.2
+    - name: cer               # reward 1 - CER vs the `reference` column
+      weight: 1.0
+      kwargs: { reference_key: reference }
+
+training:
+  output_dir: outputs/llm_grpo
+  learning_rate: 1.0e-6
+  num_generations: 8
+  max_completion_length: 512
+  per_device_train_batch_size: 8
+  num_train_epochs: 1
