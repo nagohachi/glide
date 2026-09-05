@@ -5,6 +5,7 @@ def test_data_test_resolved_against_corpus_root(tmp_path):
     from glide.config.loader import load_config
 
     (tmp_path / "run.yaml").write_text(
+        "model:\n  name: m\n  attn_implementation: sdpa\n"
         "data_roots:\n  csj: /abs/csj\n"
         "data:\n  corpus: csj\n  train: a/train.jsonl\n  eval: a/dev.jsonl\n"
         "  test: a/test.jsonl\n"

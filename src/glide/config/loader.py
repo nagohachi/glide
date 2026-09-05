@@ -241,7 +241,46 @@ def load_config(
 
     config = dict_to_dataclass(GlideConfig, merged)
     _resolve_data_paths(config)
+    _validate_required(config)
     return config
+
+
+def _validate_required(config: GlideConfig) -> None:
+    """Reject sentinel values for fields that have no meaningful default.
+
+    Some settings genuinely have no value that is right for every run (which model
+    to load, what attention kernel, the LoRA rank). Rather than shipping a default
+    that silently trains the wrong thing, the schema carries an explicit "not set"
+    sentinel and this check turns it into an error naming the YAML key.
+
+    Raises:
+        ValueError: listing every unset key, so one run surfaces all of them.
+    """
+    missing: list[str] = []
+    if not config.model.name:
+        missing.append("model.name (HF hub id or local path of the base model)")
+    if not config.model.attn_implementation:
+        missing.append("model.attn_implementation (flash_attention_2 | sdpa | eager)")
+    if config.peft.enabled:
+        if config.peft.r < 0:
+            missing.append("peft.r (LoRA rank; required when peft.enabled)")
+        if config.peft.lora_alpha < 0:
+            missing.append("peft.lora_alpha (required when peft.enabled)")
+        if config.peft.target_modules is None:
+            missing.append(
+                "peft.target_modules (e.g. all-linear; required when peft.enabled)"
+            )
+    if config.speech.warmup.projector_only_steps > 0 and config.speech.warmup.projector_lr < 0:
+        missing.append(
+            "speech.warmup.projector_lr (required when speech.warmup.projector_only_steps > 0)"
+        )
+    if missing:
+        raise ValueError(
+            "Missing required config values:\n  - "
+            + "\n  - ".join(missing)
+            + "\nSet them in your YAML (configs/base.yaml carries the common ones) "
+            "or pass them as --dotted.key overrides."
+        )
 
 
 def _resolve_data_paths(config: GlideConfig) -> None:
