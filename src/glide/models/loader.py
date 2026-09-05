@@ -95,6 +95,7 @@ def load_model_and_processor(config: GlideConfig) -> LoadedModel:
         from .speech_llm import build_speech_llm
 
         model, tok, info = build_speech_llm(config)
+        _maybe_load_state_dict(model, config.model.state_dict_path)
         return LoadedModel(model=model, processor=tok, tokenizer=tok, special_tokens=info)
 
     model_cfg = config.model
@@ -128,8 +129,36 @@ def load_model_and_processor(config: GlideConfig) -> LoadedModel:
     tokenizer = getattr(processor, "tokenizer", processor)
 
     _sanitize_generation_config(model)
+    _maybe_load_state_dict(model, model_cfg.state_dict_path)
 
     return LoadedModel(model=model, processor=processor, tokenizer=tokenizer, special_tokens=info)
+
+
+def _maybe_load_state_dict(model, path: str | None) -> None:
+    """Load a saved state dict over ``model`` in place (``strict=False``), if given.
+
+    Used to initialise a model from a prior glide checkpoint (``pytorch_model.bin``)
+    -- e.g. an SFT checkpoint as the GSPO starting policy. ``strict=False`` tolerates
+    benign key drift (the composed Speech-LLM saves encoder/projector/llm together).
+    Missing/unexpected keys are reported so a silent mismatch can't pass unnoticed.
+    """
+    if not path:
+        return
+    import torch
+
+    state = torch.load(path, map_location="cpu", weights_only=False)
+    if isinstance(state, dict) and "state_dict" in state and not any(
+        k.startswith(("llm.", "encoder.", "projector.")) for k in state
+    ):
+        state = state["state_dict"]
+    result = model.load_state_dict(state, strict=False)
+    missing, unexpected = list(result.missing_keys), list(result.unexpected_keys)
+    print(f"[glide] loaded state_dict from {path} "
+          f"(missing={len(missing)}, unexpected={len(unexpected)})")
+    if missing:
+        print(f"[glide]   first missing: {missing[:8]}")
+    if unexpected:
+        print(f"[glide]   first unexpected: {unexpected[:8]}")
 
 
 def _propagate_attn_implementation(hf_config, impl: str) -> None:

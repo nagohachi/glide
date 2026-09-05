@@ -30,7 +30,13 @@ __all__ = ["GenerationEvaluator", "GenerateEvalCallback", "TestEvalCallback"]
 class GenerationEvaluator:
     """Generate from eval records and compute text metrics."""
 
-    def __init__(self, config: GlideConfig, processor, records: Sequence[dict]):
+    def __init__(
+        self,
+        config: GlideConfig,
+        processor,
+        records: Sequence[dict],
+        cap_samples: bool = True,
+    ):
         self.config = config
         self.processor = processor
         self.tokenizer = getattr(processor, "tokenizer", processor)
@@ -39,8 +45,10 @@ class GenerationEvaluator:
             config.eval.metrics, normalize=config.eval.normalize_text
         )
         gen = config.eval.generate
+        # ``max_eval_samples`` caps validation-time decoding (generation is slow);
+        # held-out test evaluation passes cap_samples=False to score the full set.
         max_n = config.data.max_eval_samples
-        if max_n is not None:
+        if cap_samples and max_n is not None:
             self.records = self.records[:max_n]
         self.gen_kwargs = dict(
             max_new_tokens=gen.max_new_tokens,
@@ -90,12 +98,16 @@ class GenerationEvaluator:
             inputs = self._composed_collator.generation_inputs(batch_records)
             return {k: (v.to(device) if hasattr(v, "to") else v) for k, v in inputs.items()}
         modality = self.config.modality
+        # Only pass enable_thinking when configured (matches ComposedSpeechCollator).
+        ct_kwargs: dict = {}
+        if self.config.template.enable_thinking is not None:
+            ct_kwargs["enable_thinking"] = self.config.template.enable_thinking
         texts, media = [], []
         for rec in batch_records:
             msgs = build_prompt_messages(rec, self.config.data, self.config.template, modality)
             texts.append(
                 self.processor.apply_chat_template(
-                    msgs, tokenize=False, add_generation_prompt=True
+                    msgs, tokenize=False, add_generation_prompt=True, **ct_kwargs
                 )
             )
             if modality is Modality.SPEECH and self.config.data.audio_field in rec:
@@ -107,7 +119,9 @@ class GenerationEvaluator:
                 ref = rec[self.config.data.image_field]
                 media.append(Image.open(ref).convert("RGB") if isinstance(ref, str) else ref)
 
-        # Left padding is required for correct batched generation.
+        # Left padding is required for correct batched generation. Restore in a finally
+        # so an exception mid-eval doesn't leave the shared tokenizer in left-padding
+        # mode for the training collators.
         prev_side = self.tokenizer.padding_side
         self.tokenizer.padding_side = "left"
         call_kwargs: dict[str, Any] = {"text": texts, "return_tensors": "pt", "padding": True}
@@ -116,8 +130,10 @@ class GenerationEvaluator:
             call_kwargs[kw] = media
             if modality is Modality.SPEECH:
                 call_kwargs["sampling_rate"] = self.config.speech.sample_rate
-        inputs = self.processor(**call_kwargs)
-        self.tokenizer.padding_side = prev_side
+        try:
+            inputs = self.processor(**call_kwargs)
+        finally:
+            self.tokenizer.padding_side = prev_side
         return {k: (v.to(device) if hasattr(v, "to") else v) for k, v in inputs.items()}
 
     @staticmethod
@@ -206,13 +222,12 @@ class GenerateEvalCallback(TrainerCallback):
             save_path = os.path.join(args.output_dir, "eval_predictions.jsonl")
         metrics = self.evaluator.evaluate(model, save_path=save_path, step=state.global_step)
         if metrics:
-            # Surface in logs / wandb / tensorboard.
-            from transformers.trainer_callback import TrainerControl  # noqa: F401
-
-            state.log_history.append({**metrics, "step": state.global_step})
-            if hasattr(self, "_trainer") and self._trainer is not None:
+            # Trainer.log() already appends to state.log_history; only append manually on
+            # the no-trainer path, else every metric lands in trainer_state.json twice.
+            if getattr(self, "_trainer", None) is not None:
                 self._trainer.log(metrics)
             else:
+                state.log_history.append({**metrics, "step": state.global_step})
                 print(f"[glide][generate-eval] step {state.global_step}: {metrics}")
 
 
@@ -233,8 +248,8 @@ class TestEvalCallback(TrainerCallback):
             model, save_path=save_path, step=state.global_step, prefix="test"
         )
         if metrics:
-            state.log_history.append({**metrics, "step": state.global_step})
-            if hasattr(self, "_trainer") and self._trainer is not None:
+            if getattr(self, "_trainer", None) is not None:
                 self._trainer.log(metrics)
             else:
+                state.log_history.append({**metrics, "step": state.global_step})
                 print(f"[glide][test-eval] step {state.global_step}: {metrics}")

@@ -81,6 +81,15 @@ def _run_training(config, task: str) -> int:
     return 0
 
 
+def _to_eval_device(model):
+    """Move a standalone eval/test model to CUDA when available (else leave on CPU)."""
+    import torch
+
+    if torch.cuda.is_available():
+        model.to("cuda")
+    return model
+
+
 def _run_eval(config_path, overrides: list[str], checkpoint: str | None = None) -> int:
     from ..config.loader import load_config
     from ..data.jsonl import read_jsonl
@@ -94,6 +103,7 @@ def _run_eval(config_path, overrides: list[str], checkpoint: str | None = None) 
     config.eval.generate.enabled = True
     init_plugins(config)
     loaded = load_model_and_processor(config)
+    _to_eval_device(loaded.model)
 
     if config.data.eval is None:
         print("[glide] no data.eval configured; nothing to evaluate.", file=sys.stderr)
@@ -124,6 +134,7 @@ def _run_test(
     config.eval.generate.enabled = True
     init_plugins(config)
     loaded = load_model_and_processor(config)
+    _to_eval_device(loaded.model)
 
     if config.data.test is None:
         print("[glide] no data.test configured; nothing to evaluate.", file=sys.stderr)
@@ -133,7 +144,8 @@ def _run_test(
     for p in paths:
         records.extend(read_jsonl(p))
 
-    evaluator = GenerationEvaluator(config, loaded.processor, records)
+    # Test evaluation always scores the full set; max_eval_samples only caps validation.
+    evaluator = GenerationEvaluator(config, loaded.processor, records, cap_samples=False)
     metrics = evaluator.evaluate(loaded.model, save_path=output, prefix="test")
     print("[glide][test]", metrics)
     return 0
@@ -169,7 +181,10 @@ def _run_docs(output: str, serve: bool) -> int:
         "--template-directory",
         _TEMPLATE_DIR,
     ]
-    cmd += ["--http", ":8080"] if serve else ["-o", output]
+    # Modern pdoc (>=14) serves at http://localhost:8080 by default when no output dir
+    # is given; the old pdoc3 `--http :8080` flag no longer exists (argparse error).
+    if not serve:
+        cmd += ["-o", output]
     print(
         f"[glide] generating docs for {len(modules)} modules -> "
         f"{'http://localhost:8080' if serve else output}"

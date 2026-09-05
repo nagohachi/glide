@@ -177,14 +177,30 @@ def dict_to_dataclass(cls: type, data: Any) -> Any:
 
 def _hydrate_value(ftype: Any, value: Any) -> Any:
     origin = get_origin(ftype)
+    # An empty YAML section (`training:` with every key commented out) parses to None;
+    # hydrate to the container default instead of leaving None to crash a later
+    # `.setdefault(...)`. Optional scalars keep None (their intended value).
+    if value is None:
+        if dataclasses.is_dataclass(ftype):
+            return ftype()
+        if origin is dict:
+            return {}
+        if origin in (list, tuple):
+            return []
+        return None
     # Enum field.
     if isinstance(ftype, type) and issubclass(ftype, _enum_base()):
         return ftype(value)
     # Nested dataclass.
     if dataclasses.is_dataclass(ftype):
         return dict_to_dataclass(ftype, value)
-    # list[X] where X is a dataclass (e.g. list[RewardSpec]).
-    if origin in (list, tuple) and value is not None:
+    # list[X] / tuple[X].
+    if origin in (list, tuple):
+        # A scalar CLI override to a list field (`--eval.metrics cer`) arrives as the bare
+        # scalar; wrap it so consumers that iterate don't walk the string char-by-char
+        # (`build_metric_fn` -> KeyError: No metric named 'c').
+        if not isinstance(value, (list, tuple)):
+            value = [value]
         (item_type,) = get_args(ftype) or (Any,)
         if dataclasses.is_dataclass(item_type):
             return [dict_to_dataclass(item_type, v) for v in value]
@@ -321,6 +337,18 @@ def build_training_args(config: GlideConfig, trl_config_cls: type, *, now=None):
         raw.setdefault("gradient_checkpointing_kwargs", {"use_reentrant": False})
     if config.logging.run_name:
         raw.setdefault("run_name", config.logging.run_name)
+
+    # bf16 auto-gating: transformers 5 resolves the default bf16=None by auto-enabling
+    # bf16, which then fails TrainingArguments validation on a CPU-only host ("setup
+    # doesn't support bf16/gpu"). Pin it to what the hardware actually supports unless the
+    # user set bf16/fp16 explicitly.
+    if "bf16" not in raw and "fp16" not in raw and "bf16" in {f.name for f in dataclasses.fields(trl_config_cls)}:
+        try:
+            import torch
+
+            raw["bf16"] = bool(torch.cuda.is_available() and torch.cuda.is_bf16_supported())
+        except Exception:
+            raw["bf16"] = False
 
     valid = {f.name for f in dataclasses.fields(trl_config_cls)}
     unknown = set(raw) - valid

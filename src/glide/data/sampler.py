@@ -89,7 +89,10 @@ class LengthGroupedBatchSampler(Sampler[list[int]]):
             rng = random.Random(self.seed + self.epoch)
             rng.shuffle(indices)
 
-        mega = self.batch_size * self.mega_batch_mult
+        # shuffle=False -> a single mega-batch spanning the whole dataset, so the sort
+        # below is a *global* length sort (deterministic, minimal padding) as documented,
+        # not merely per-megabatch.
+        mega = n if not self.shuffle else self.batch_size * self.mega_batch_mult
         megabatches = [indices[i : i + mega] for i in range(0, n, mega)]
         # Sort each mega-batch by descending length -> homogeneous local batches.
         megabatches = [
