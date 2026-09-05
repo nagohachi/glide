@@ -14,6 +14,7 @@ Records are arbitrary JSON objects; field names are interpreted by the active
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -63,6 +64,7 @@ class JsonlDataset(Dataset[dict[str, Any]]):
         self._index: list[tuple[int, int]] = []
         self._records: list[dict[str, Any]] | None = None
         self._files = None
+        self._files_pid: int | None = None
 
         if lazy:
             for fi, p in enumerate(self.paths):
@@ -88,9 +90,15 @@ class JsonlDataset(Dataset[dict[str, Any]]):
         return len(self._index) if self.lazy else len(self._records or [])
 
     def _ensure_files(self):
-        # Open files lazily and per-process (safe across dataloader workers).
-        if self._files is None:
+        # Open files lazily and per-process. DataLoader workers are fork-spawned on
+        # Linux, and fork bypasses __getstate__, so a child would otherwise inherit the
+        # parent's open file *descriptions* -- sharing a single seek offset across
+        # processes and racing seek()+readline() into corrupt/nondeterministic reads.
+        # Re-open whenever the owning pid changes (the common HF datasets pattern).
+        pid = os.getpid()
+        if self._files is None or self._files_pid != pid:
             self._files = [open(p, "rb") for p in self.paths]
+            self._files_pid = pid
         return self._files
 
     def __getitem__(self, index: int) -> dict[str, Any]:
@@ -108,6 +116,7 @@ class JsonlDataset(Dataset[dict[str, Any]]):
         # Drop open file handles so workers can pickle the dataset.
         state = self.__dict__.copy()
         state["_files"] = None
+        state["_files_pid"] = None
         return state
 
 
