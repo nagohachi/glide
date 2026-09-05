@@ -1,4 +1,4 @@
-"""glide -- a TRL-based post-training library.
+"""glide — a TRL-based post-training library.
 
 ``glide`` specializes in post-training of LLMs, Speech-LLMs (speech + text input)
 and Vision-LLMs (vision + text input). It supports supervised fine-tuning (SFT)
@@ -8,7 +8,7 @@ projectors, reward functions, metrics).
 
 .. _TRL: https://github.com/huggingface/trl
 
-``glide`` is a standard installable package -- install it however you like (there
+``glide`` is a standard installable package — install it however you like (there
 is no required directory layout); plugin paths resolve against your working
 directory. Typical usage from a project::
 
