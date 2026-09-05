@@ -18,7 +18,7 @@ special_tokens:
   additional: ["<audio>"]
 
 data:
-  corpus: csj                        # data_roots[csj] from data_root.yaml
+  root_key: csj                        # data_roots[csj] from data_root.yaml
   audio_field: audio
   response_field: text
   reference_field: text

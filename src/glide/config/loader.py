@@ -286,18 +286,18 @@ def _validate_required(config: GlideConfig) -> None:
 def _resolve_data_paths(config: GlideConfig) -> None:
     """Prepend the data root to relative ``*_jsonl_path`` values (in place).
 
-    The root is ``data_roots[data.corpus]`` when ``data.corpus`` is set, else the
-    explicit ``data.root``.
+    The root is ``data_roots[data.root_key]`` when ``data.root_key`` is set, else
+    the explicit ``data.root_dir``.
     """
-    if config.data.corpus:
-        if config.data.corpus not in config.data_roots:
+    if config.data.root_key:
+        if config.data.root_key not in config.data_roots:
             raise ValueError(
-                f"data.corpus={config.data.corpus!r} not found in data_roots "
+                f"data.root_key={config.data.root_key!r} not found in data_roots "
                 f"{sorted(config.data_roots)}; define it in your data_root.yaml."
             )
-        root = config.data_roots[config.data.corpus]
+        root = config.data_roots[config.data.root_key]
     else:
-        root = config.data.root
+        root = config.data.root_dir
     if not root:
         return
 

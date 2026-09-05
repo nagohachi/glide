@@ -26,7 +26,7 @@ task: sft
 modality: speech
 
 model:
-  name: Qwen/Qwen3-1.7B               # the text LLM
+  model_name_or_id: Qwen/Qwen3-1.7B               # the text LLM
   attn_implementation: sdpa
   torch_dtype: bfloat16
 
@@ -35,9 +35,9 @@ special_tokens:
   additional: ["<audio>"]
 
 data:
-  corpus: csj                        # data_roots[corpus] from data_root.yaml
-  train: native_sft_10h/train.jsonl  # relative to the corpus root
-  eval: native_sft/dev.jsonl
+  root_key: csj                        # data_roots[root_key] from data_root.yaml
+  train_jsonl_path: native_sft_10h/train.jsonl  # relative to the data root
+  eval_jsonl_path: native_sft/dev.jsonl
   response_field: text
   reference_field: text
   max_eval_samples: 200              # cap eval (AR generation is slow)

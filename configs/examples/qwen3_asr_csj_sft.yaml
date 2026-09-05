@@ -2,7 +2,7 @@
 # (.venv-qwenasr). Run from the glide project root:
 #   UV_PROJECT_ENVIRONMENT=.venv-qwenasr uv run --no-sync glide sft \
 #       configs/examples/qwen3_asr_csj_sft.yaml
-# data_root.yaml (gitignored; copy from data_root.example.yaml) maps corpus -> root;
+# data_root.yaml (gitignored; copy from data_root.example.yaml) maps root_key -> absolute root;
 # so paths below stay machine-independent.
 extends: [../data_root.yaml, ../base.yaml]
 
@@ -19,8 +19,8 @@ model:
   gradient_checkpointing: true
 
 data:
-  corpus: csj                     # selects data_roots[corpus] from data_root.yaml
-  train_jsonl_path: native_sft/train.jsonl   # relative to the corpus root
+  root_key: csj                     # selects data_roots[root_key] from data_root.yaml
+  train_jsonl_path: native_sft/train.jsonl   # relative to the data root
   eval_jsonl_path: native_sft/dev.jsonl
   audio_field: audio
   response_field: text           # CSJ target transcript field

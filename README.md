@@ -199,9 +199,9 @@ and per-sample predictions are saved to `{output_dir}/eval_predictions.jsonl`
 
 ```yaml
 data:
-  train: data/train.jsonl
-  eval:  data/dev.jsonl
-  test:  data/test.jsonl   # evaluated once at the very end of training
+  train_jsonl_path: data/train.jsonl
+  eval_jsonl_path:  data/dev.jsonl
+  test_jsonl_path:  data/test.jsonl   # evaluated once at the very end of training
 
 eval:
   generate:
