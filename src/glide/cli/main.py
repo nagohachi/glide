@@ -275,6 +275,15 @@ def main(argv: list[str] | None = None) -> int:
         # (configured in YAML), unless we're already a spawned worker.
         if not _is_distributed_worker():
             nproc = _resolve_nproc(config.distributed)
+            # Speech GSPO/GRPO (rl_speech) is single-GPU only; don't self-launch DDP for it
+            # (the grad forward calls a custom method DDP can't proxy). Guarded again in
+            # SpeechGSPOTrainer.__init__.
+            from ..config.schema import Modality
+
+            if config.modality is Modality.SPEECH and args.command in ("grpo", "gspo") and nproc > 1:
+                print("[glide] speech RL is single-GPU only; not launching under torchrun "
+                      "(pin distributed.nproc_per_node: 1 to silence this).")
+                nproc = 1
             if nproc > 1:
                 return _relaunch_distributed(argv, config.distributed, nproc)
         return _run_training(config, args.command)
