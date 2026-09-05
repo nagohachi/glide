@@ -328,6 +328,11 @@ def build_training_args(config: GlideConfig, trl_config_cls: type, *, now=None):
     report_to = [r for r in config.logging.report_to if r != "none"]
     raw.setdefault("report_to", report_to or "none")
     raw.setdefault("seed", config.seed)
+    # Wire data.num_workers -> the dataloader worker count (it was otherwise never read;
+    # actual workers came only from training.dataloader_num_workers). Explicit
+    # training.dataloader_num_workers still wins.
+    if "dataloader_num_workers" in {f.name for f in dataclasses.fields(trl_config_cls)}:
+        raw.setdefault("dataloader_num_workers", config.data.num_workers)
     if config.model.gradient_checkpointing:
         raw.setdefault("gradient_checkpointing", True)
     # Non-reentrant checkpointing is required for gradient checkpointing under DDP

@@ -2,7 +2,7 @@
 # override only what differs. CLI flags (`--training.learning_rate 1e-5`) override
 # everything. Every key maps 1:1 to the dataclasses in glide.config.schema.
 
-task: sft          # sft | grpo | gspo | ppo  (the CLI subcommand wins)
+task: sft          # sft | grpo | gspo  (the CLI subcommand wins)
 modality: text     # text | speech | vision
 seed: 42
 

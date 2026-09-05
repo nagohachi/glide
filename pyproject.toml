@@ -1,7 +1,7 @@
 [project]
 name = "glide"
 version = "0.1.0"
-description = "A TRL-based post-training library specialized in LLM / Speech-LLM / Vision-LLM SFT and RL (PPO, GRPO, GSPO)."
+description = "A TRL-based post-training library specialized in LLM / Speech-LLM / Vision-LLM SFT and RL (GRPO, GSPO)."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
