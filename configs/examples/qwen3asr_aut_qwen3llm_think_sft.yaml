@@ -1,0 +1,71 @@
+# Composed Speech-LLM:  Qwen3-ASR audio tower (AuT) + Qwen3-ASR projector (pretrained)
+#                       + Qwen3-1.7B text LLM, with Qwen3 *thinking* mode.
+#
+# This reassembles Qwen3-ASR's front-end onto a stock Qwen3-1.7B LLM: the pretrained
+# projector already maps the AuT output to Qwen3's 2048-d hidden space, so it slots in.
+# Requires the transformers==4.57.6 env (.venv-qwenasr; provides qwen_asr + Qwen3-ASR):
+#   UV_PROJECT_ENVIRONMENT=.venv-qwenasr uv run --no-sync glide sft \
+#       configs/examples/qwen3asr_aut_qwen3llm_think_sft.yaml
+extends: [../data_root.yaml, ../base.yaml]
+
+task: sft
+modality: speech
+
+model:
+  name: Qwen/Qwen3-1.7B          # the text LLM (thinking-capable)
+  attn_implementation: sdpa
+  torch_dtype: bfloat16
+  gradient_checkpointing: true
+
+special_tokens:
+  audio_token: "<audio>"         # marker spliced with projected audio frames
+  additional: ["<audio>"]
+
+data:
+  corpus: csj                    # data_roots[csj] from data_root.yaml
+  train: native_sft/train.jsonl  # records: {"audio": ..., "text": ...[, "think": ...]}
+  eval: native_sft/dev.jsonl
+  audio_field: audio
+  response_field: text           # the final answer (transcript)
+  reference_field: text
+  reasoning_field: think         # field holding the CoT used as <think> content (thinking mode)
+
+speech:
+  enabled: true
+  task: recognition
+  sample_rate: 16000
+  length_grouped_sampler: true
+  max_tokens_per_batch: 480000
+  encoder:
+    name: qwen3_asr_aut          # Qwen3-ASR audio tower (self-registers the arch)
+    pretrained: Qwen/Qwen3-ASR-1.7B
+    freeze: false
+  projector:
+    name: qwen3_asr_proj         # Qwen3-ASR's pretrained projector (AuT -> LLM hidden)
+    pretrained: Qwen/Qwen3-ASR-1.7B
+  # Optional: projector-only warmup -> full FT (uncomment to stage training)
+  # warmup:
+  #   projector_only_steps: 1000
+  #   projector_lr: 1.0e-4
+
+template:
+  system_prompt: ""
+  train_on_completions_only: true   # prefix-masking is enable_thinking-aware (no marker needed)
+  # ---- THINKING SWITCH -------------------------------------------------------
+  # true  : train the model to REASON. Target = <think>{think}</think>{text};
+  #         provide the reasoning in data.reasoning_field ("think"). Prompt prefix
+  #         is "...assistant\n", so SFT supervises the whole <think>...</think> + answer.
+  # false : train NON-thinking. An empty <think></think> is injected into the prompt
+  #         prefix and the model is supervised only on {text} (reasoning_field ignored).
+  # null  : use the model's template default (Qwen3 = thinking on).
+  enable_thinking: true
+  # ---------------------------------------------------------------------------
+
+training:
+  output_dir: outputs/qwen3asr_aut_qwen3llm_think
+  per_device_train_batch_size: 8
+  learning_rate: 1.0e-5
+  num_train_epochs: 3
+
+distributed:
+  nproc_per_node: null            # auto = all visible GPUs

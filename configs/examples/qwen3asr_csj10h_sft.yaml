@@ -1,0 +1,21 @@
+# NON-thinking CSJ-10h run. Shared settings live in qwen3asr_csj10h_base.yaml.
+#   wait_gpu 6 --server sacs01 --priority 2 --name csj10h_sft ./scripts/run_csj10h_sft.sh
+extends: [qwen3asr_csj10h_base.yaml]
+
+data:
+  train: native_sft_10h/train.jsonl   # 10h subset (scripts/build_csj_10h.py)
+  eval: native_sft/dev.jsonl
+
+template:
+  system_prompt: "Please transcribe the speech to text."
+  enable_thinking: false              # empty <think></think>; supervise the transcript only
+
+logging:
+  run_name: csj10h_sft
+  tags: [csj, 10h, qwen3asr-aut, qwen3-1.7b, fa2-varlen, non-think]
+
+training:
+  output_dir: outputs/qwen3asr_csj10h_sft
+  num_train_epochs: 20
+  learning_rate: 2.0e-5
+  warmup_ratio: 0.05
