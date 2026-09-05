@@ -9,6 +9,7 @@ perturbation (waveform) and SpecAugment (log-mel features) at train time.
 """
 
 import random
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -133,12 +134,21 @@ class ComposedSpeechCollator:
         feats = self.feature_extractor(wavs, sampling_rate=self.sample_rate, return_tensors="pt")
         if self.input_kind == "input_features":
             features = feats["input_features"]
-            if self.train and self.specaugment is not None:
-                features = spec_augment(features, self.specaugment)
+            if self.train and self.specaugment is not None and self.specaugment.enabled:
+                features = spec_augment(
+                    features, self.specaugment, attention_mask=feats.get("attention_mask")
+                )
             batch["input_features"] = features
             if "attention_mask" in feats:
                 batch["feature_attention_mask"] = feats["attention_mask"]
         else:
+            if self.train and self.specaugment is not None and self.specaugment.enabled:
+                warnings.warn(
+                    "speech.specaugment is enabled but the encoder consumes raw waveforms "
+                    "(input_values, e.g. WavLM/XLS-R); SpecAugment only applies to log-mel "
+                    "input_features and is being ignored.",
+                    stacklevel=2,
+                )
             batch["input_values"] = feats["input_values"]
             if "attention_mask" in feats:
                 batch["audio_attention_mask"] = feats["attention_mask"]
