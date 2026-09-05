@@ -78,7 +78,9 @@ class PeftConfigSpec:
     enabled: bool = False
     r: int = 16
     lora_alpha: int = 32
-    lora_dropout: float = 0.05
+    #: PEFT's own default. The LoRA paper reports 0.1 for its GLUE runs; 0.05 is
+    #: the QLoRA convention, not an original-paper value.
+    lora_dropout: float = 0.0
     target_modules: list[str] | str = "all-linear"
     modules_to_save: list[str] = field(default_factory=list)
     bias: Literal["none", "all", "lora_only"] = "none"
