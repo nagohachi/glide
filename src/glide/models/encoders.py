@@ -249,8 +249,16 @@ def build_qwen_omni_aut(cfg: AudioEncoderConfig, sample_rate: int = 16000):
     repo = cfg.pretrained or "Qwen/Qwen2.5-Omni-7B"
     full = AutoModel.from_pretrained(repo, trust_remote_code=True, **cfg.extra_kwargs)
     tower = _find_audio_tower(full)
-    out_dim = int(getattr(tower.config, "d_model", None)
-                  or getattr(tower.config, "output_dim", 0))
+    # The tower's self.proj emits config.output_dim (e.g. 3584); config.d_model (1280) is
+    # the *internal* width. Prefer output_dim so the projector's in_dim matches reality.
+    out_dim = int(getattr(tower.config, "output_dim", None)
+                  or getattr(tower.config, "d_model", 0))
+
+    return _build_omni_tower(tower, repo, out_dim, cfg.freeze)
+
+
+def _build_omni_tower(tower, repo: str, out_dim: int, freeze: bool):
+    from transformers import AutoFeatureExtractor
 
     class _OmniTower(AudioEncoder):
         input_kind = "input_features"
@@ -260,12 +268,45 @@ def build_qwen_omni_aut(cfg: AudioEncoderConfig, sample_rate: int = 16000):
             self.model = tower
             self.feature_extractor = AutoFeatureExtractor.from_pretrained(repo)
             self.output_dim = out_dim
-            _maybe_freeze(self.model, cfg.freeze)
+            _maybe_freeze(self.model, freeze)
+
+        def _feat_lens(self, input_features, feature_attention_mask):
+            n_frames = input_features.shape[-1]
+            if feature_attention_mask is not None:
+                # Normalize whatever resolution the mask is at (sample- or frame-level)
+                # to valid mel frames via the length ratio.
+                mask_len = feature_attention_mask.shape[1]
+                valid = feature_attention_mask.sum(dim=1).float()
+                return (valid * n_frames / mask_len).round().long().clamp(1, n_frames)
+            return torch.full((input_features.shape[0],), n_frames,
+                              device=input_features.device, dtype=torch.long)
+
+        @staticmethod
+        def _pack(chunks, device):
+            lmax = max(c.shape[0] for c in chunks)
+            hidden = chunks[0].new_zeros(len(chunks), lmax, chunks[0].shape[-1])
+            mask = torch.zeros(len(chunks), lmax, dtype=torch.long, device=device)
+            for b, c in enumerate(chunks):
+                hidden[b, : c.shape[0]] = c
+                mask[b, : c.shape[0]] = 1
+            return hidden, mask
 
         def forward(self, input_features, feature_attention_mask=None, **_):
-            out = self.model(input_features, feature_attention_mask=feature_attention_mask)
-            hidden = out.last_hidden_state if hasattr(out, "last_hidden_state") else out
-            mask = torch.ones(hidden.shape[:2], dtype=torch.long, device=hidden.device)
-            return hidden, mask
+            # The Omni audio tower consumes the *flat varlen* form (num_mel_bins,
+            # sum_frames) with an explicit feature_lens (without it,
+            # chunk_and_pad_features(..., None, ...) crashes), and returns a flat
+            # (sum_pooled_frames, output_dim) tensor -- NOT (B, T, H). Concatenate the
+            # valid mel frames across utterances, then split the output back per-utterance
+            # into the padded (B, T, H) that SpeechLLM._encode_audio expects.
+            feat_lens = self._feat_lens(input_features, feature_attention_mask)
+            feats = torch.cat(
+                [input_features[b][:, : int(feat_lens[b])] for b in range(input_features.shape[0])],
+                dim=1,
+            )
+            out = self.model(feats, feature_lens=feat_lens)
+            flat = out.last_hidden_state if hasattr(out, "last_hidden_state") else out
+            _, out_lens = self.model._get_feat_extract_output_lengths(feat_lens)
+            chunks = list(flat.split([int(x) for x in out_lens], dim=0))
+            return self._pack(chunks, flat.device)
 
     return _OmniTower()
