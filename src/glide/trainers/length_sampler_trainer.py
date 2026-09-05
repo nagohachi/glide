@@ -157,7 +157,7 @@ class LengthGroupedSFTTrainer(SFTTrainer):
         self.optimizer = optimizer
         if self.args.process_index == 0:
             _log.info(f"warmup: projector group: {sum(p.numel() for p in proj):,} params | "
-                  f"rest: {sum(p.numel() for p in rest):,} params", flush=True)
+                  f"rest: {sum(p.numel() for p in rest):,} params")
         return optimizer
 
     def create_scheduler(self, num_training_steps: int, optimizer=None):
@@ -180,7 +180,7 @@ class LengthGroupedSFTTrainer(SFTTrainer):
         )
         if self.args.process_index == 0:
             _log.info(f"warmup: P={w.projector_only_steps} (proj 0->{w.projector_lr:g}), "
-                  f"then 0->{target_lr:g}, decay to 0 by {num_training_steps}", flush=True)
+                  f"then 0->{target_lr:g}, decay to 0 by {num_training_steps}")
         scheduler = LambdaLR(opt, [proj_lam, rest_lam])
         self.lr_scheduler = scheduler
         return scheduler
