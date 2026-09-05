@@ -42,8 +42,8 @@ def _build_collator(config: GlideConfig, loaded):
             data=config.data,
             template=config.template,
             sample_rate=config.speech.sample_rate,
-            speed_perturb=config.speech.speed_perturb,
-            specaugment=config.speech.specaugment,
+            speed_perturb=config.speech.augment.speed_perturb,
+            specaugment=config.speech.augment.specaugment,
             completion_only=config.template.train_on_completions_only,
         )
     if config.template.collator:

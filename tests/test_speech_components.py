@@ -67,18 +67,20 @@ def test_speech_config_nested_hydration():
         "speech": {
             "encoder": {"name": "whisper", "pretrained": "openai/whisper-small", "freeze": True},
             "projector": {"name": "mlp_gelu", "downsample": 5},
-            "specaugment": {"enabled": True, "num_time_mask": 3},
-            "speed_perturb": {"enabled": True, "from_field": True},
+            "augment": {
+                "specaugment": {"enabled": True, "num_time_mask": 3},
+                "speed_perturb": {"enabled": True, "from_field": True},
+            },
         },
     })
     assert isinstance(cfg.speech.encoder, AudioEncoderConfig)
     assert cfg.speech.encoder.name == "whisper" and cfg.speech.encoder.freeze
     assert isinstance(cfg.speech.projector, ProjectorConfig)
     assert cfg.speech.projector.downsample == 5
-    assert isinstance(cfg.speech.specaugment, SpecAugmentConfig)
-    assert cfg.speech.specaugment.num_time_mask == 3
-    assert isinstance(cfg.speech.speed_perturb, SpeedPerturbConfig)
-    assert cfg.speech.speed_perturb.from_field
+    assert isinstance(cfg.speech.augment.specaugment, SpecAugmentConfig)
+    assert cfg.speech.augment.specaugment.num_time_mask == 3
+    assert isinstance(cfg.speech.augment.speed_perturb, SpeedPerturbConfig)
+    assert cfg.speech.augment.speed_perturb.from_field
 
 
 def test_builtin_encoders_and_projectors_registered():
