@@ -18,6 +18,10 @@ from ..config.schema import ProjectorConfig
 from ..registry import projectors
 from .plugins_base import Projector
 
+from ..logging_utils import get_logger
+
+_log = get_logger("models")
+
 __all__ = ["MLPGeLUProjector"]
 
 
@@ -171,8 +175,10 @@ def build_qwen3_asr_proj(cfg: ProjectorConfig, in_dim: int, out_dim: int):
             _load_state_into(proj, cfg.pretrained, key_filter="audio_tower.proj",
                              key_map=_QWEN_PROJ_KEY_MAP)
         except Exception as exc:  # pragma: no cover - depends on checkpoint layout
-            print(f"[glide] qwen3_asr_proj: could not load pretrained weights ({exc}); "
-                  "using a freshly-initialized projector.")
+            _log.warning(
+                "%s: could not load pretrained weights (%s); "
+                "using a freshly-initialized projector.", "qwen3_asr_proj", exc
+            )
     if cfg.freeze:
         for p in proj.parameters():
             p.requires_grad_(False)
@@ -189,8 +195,10 @@ def build_qwen_omni_proj(cfg: ProjectorConfig, in_dim: int, out_dim: int):
             _load_state_into(proj, cfg.pretrained, key_filter="audio_tower.proj",
                              key_map=_QWEN_PROJ_KEY_MAP)
         except Exception as exc:  # pragma: no cover
-            print(f"[glide] qwen_omni_proj: could not load pretrained weights ({exc}); "
-                  "using a freshly-initialized projector.")
+            _log.warning(
+                "%s: could not load pretrained weights (%s); "
+                "using a freshly-initialized projector.", "qwen_omni_proj", exc
+            )
     if cfg.freeze:
         for p in proj.parameters():
             p.requires_grad_(False)

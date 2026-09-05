@@ -17,6 +17,10 @@ from typing import Any
 from ..config.schema import GlideConfig, Modality
 from .special_tokens import SpecialTokenInfo, apply_special_tokens
 
+from ..logging_utils import get_logger
+
+_log = get_logger("models")
+
 __all__ = ["load_model_and_processor", "LoadedModel", "resolve_dtype"]
 
 _DEFAULT_AUTO_CLASS = {
@@ -71,7 +75,7 @@ def _load_processor(model_cfg, modality: Modality, vision_cfg=None):
     """Load an ``AutoProcessor`` for multimodal models, else an ``AutoTokenizer``."""
     import transformers
 
-    name = model_cfg.tokenizer_name or model_cfg.name
+    name = model_cfg.tokenizer_name_or_id or model_cfg.model_name_or_id
     kwargs = {"trust_remote_code": model_cfg.trust_remote_code}
     if modality in (Modality.SPEECH, Modality.VISION):
         proc_kwargs = dict(kwargs)
@@ -125,12 +129,12 @@ def load_model_and_processor(config: GlideConfig) -> LoadedModel:
     # top-level setting, leaving the text decoder on sdpa even when
     # flash_attention_2 is requested -- which silently breaks FA2 sequence packing.
     hf_config = transformers.AutoConfig.from_pretrained(
-        model_cfg.name, trust_remote_code=model_cfg.trust_remote_code
+        model_cfg.model_name_or_id, trust_remote_code=model_cfg.trust_remote_code
     )
     _propagate_attn_implementation(hf_config, model_cfg.attn_implementation)
     load_kwargs["config"] = hf_config
 
-    model = auto_class.from_pretrained(model_cfg.name, **load_kwargs)
+    model = auto_class.from_pretrained(model_cfg.model_name_or_id, **load_kwargs)
     processor = _load_processor(model_cfg, config.modality, config.vision)
 
     info = apply_special_tokens(processor, model, config.special_tokens)
@@ -161,12 +165,12 @@ def _maybe_load_state_dict(model, path: str | None) -> None:
         state = state["state_dict"]
     result = model.load_state_dict(state, strict=False)
     missing, unexpected = list(result.missing_keys), list(result.unexpected_keys)
-    print(f"[glide] loaded state_dict from {path} "
+    _log.info(f"loaded state_dict from {path} "
           f"(missing={len(missing)}, unexpected={len(unexpected)})")
     if missing:
-        print(f"[glide]   first missing: {missing[:8]}")
+        _log.info(f"  first missing: {missing[:8]}")
     if unexpected:
-        print(f"[glide]   first unexpected: {unexpected[:8]}")
+        _log.info(f"  first unexpected: {unexpected[:8]}")
 
 
 def _propagate_attn_implementation(hf_config, impl: str) -> None:

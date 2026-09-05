@@ -5,7 +5,7 @@ task: sft
 modality: speech
 
 model:
-  name: Qwen/Qwen3-ASR-1.7B
+  model_name_or_id: Qwen/Qwen3-ASR-1.7B
   attn_implementation: sdpa
   # For a model with a built-in audio tower, leave speech.encoder/projector null.
 
@@ -18,8 +18,8 @@ data:
   # JSONL records, e.g.:
   # {"audio": "/path/utt.wav", "messages": [...]}  or
   # {"audio": "/path/utt.wav", "prompt": "Transcribe.", "response": "hello world", "reference": "hello world"}
-  train: data/asr_train.jsonl
-  eval: data/asr_eval.jsonl
+  train_jsonl_path: data/asr_train.jsonl
+  eval_jsonl_path: data/asr_eval.jsonl
   audio_field: audio
   reference_field: reference
 
@@ -28,9 +28,10 @@ speech:
   task: recognition
   sample_rate: 16000
   length_grouped_sampler: true       # similar-length batches; order varies per epoch
-  specaugment:
-    enabled: true
 
+  augment:
+    specaugment:
+      enabled: true
 template:
   train_on_completions_only: true
   response_template: "<|im_start|>assistant\n"   # used for completion-only masking

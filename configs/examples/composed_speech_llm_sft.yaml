@@ -1,13 +1,13 @@
 # Composed Speech-LLM SFT: pick an encoder + projector + text LLM independently.
 #   glide sft configs/examples/composed_speech_llm_sft.yaml
-# data_root.yaml (gitignored; copy from data_root.example.yaml) maps corpus -> root.
+# data_root.yaml (gitignored; copy from data_root.example.yaml) maps root_key -> absolute root.
 extends: [../data_root.yaml, ../base.yaml]
 
 task: sft
 modality: speech
 
 model:
-  name: meta-llama/Llama-3.2-1B          # text LLM: Qwen3-1.7B | Llama-3.2-1B/3B | google/gemma-3-1b-it | ...
+  model_name_or_id: meta-llama/Llama-3.2-1B          # text LLM: Qwen3-1.7B | Llama-3.2-1B/3B | google/gemma-3-1b-it | ...
   attn_implementation: sdpa
   torch_dtype: bfloat16
 
@@ -16,9 +16,9 @@ special_tokens:
   additional: ["<audio>"]
 
 data:
-  corpus: csj                     # selects data_roots[corpus] from data_root.yaml
-  train: native_sft/train.jsonl       # relative to the corpus root
-  eval: native_sft/dev.jsonl
+  root_key: csj                     # selects data_roots[root_key] from data_root.yaml
+  train_jsonl_path: native_sft/train.jsonl       # relative to the data root
+  eval_jsonl_path: native_sft/dev.jsonl
   audio_field: audio
   response_field: text
   reference_field: text
@@ -35,14 +35,6 @@ speech:
     name: mlp_gelu                        # mlp_gelu (scratch) | qwen3_asr_proj | qwen_omni_proj
     num_layers: 2
     downsample: 5                         # stack 5 frames -> 5x shorter audio sequence
-  specaugment:
-    enabled: true
-    num_freq_mask: 2
-    num_time_mask: 5
-  speed_perturb:
-    enabled: true
-    from_field: true                      # use each record's "speed" (CSJ native_sft style)
-    factors: [0.9, 1.0, 1.1]
   warmup:                                 # projector-only warmup -> full fine-tuning
     projector_only_steps: 1000            # phase 1: train ONLY the projector
     projector_lr: 1.0e-4                  # phase-1 projector LR
@@ -50,6 +42,15 @@ speech:
     # projector_patterns defaults cover both the composed projector and Qwen3-ASR's
     # audio_tower.proj1/proj2 -- override if your projector lives elsewhere.
 
+  augment:
+    specaugment:
+      enabled: true
+      num_freq_mask: 2
+      num_time_mask: 5
+    speed_perturb:
+      enabled: true
+      from_field: true                      # use each record's "speed" (CSJ native_sft style)
+      factors: [0.9, 1.0, 1.1]
 template:
   system_prompt: ""
   train_on_completions_only: true   # composed collator masks the chat-template prompt

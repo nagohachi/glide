@@ -5,11 +5,11 @@ task: sft
 modality: text
 
 model:
-  name: Qwen/Qwen3-1.7B
+  model_name_or_id: Qwen/Qwen3-1.7B
 
 data:
-  train: data/train.jsonl      # records: {"messages": [...]} or {"prompt","response"}
-  eval: data/eval.jsonl
+  train_jsonl_path: data/train.jsonl      # records: {"messages": [...]} or {"prompt","response"}
+  eval_jsonl_path: data/eval.jsonl
 
 template:
   train_on_completions_only: true

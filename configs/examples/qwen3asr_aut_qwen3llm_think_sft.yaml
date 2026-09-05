@@ -12,7 +12,7 @@ task: sft
 modality: speech
 
 model:
-  name: Qwen/Qwen3-1.7B          # the text LLM (thinking-capable)
+  model_name_or_id: Qwen/Qwen3-1.7B          # the text LLM (thinking-capable)
   attn_implementation: sdpa
   torch_dtype: bfloat16
   gradient_checkpointing: true
@@ -22,9 +22,9 @@ special_tokens:
   additional: ["<audio>"]
 
 data:
-  corpus: csj                    # data_roots[csj] from data_root.yaml
-  train: native_sft/train.jsonl  # records: {"audio": ..., "text": ...[, "think": ...]}
-  eval: native_sft/dev.jsonl
+  root_key: csj                    # data_roots[csj] from data_root.yaml
+  train_jsonl_path: native_sft/train.jsonl  # records: {"audio": ..., "text": ...[, "think": ...]}
+  eval_jsonl_path: native_sft/dev.jsonl
   audio_field: audio
   response_field: text           # the final answer (transcript)
   reference_field: text

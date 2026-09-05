@@ -27,12 +27,12 @@ task: sft
 modality: text
 
 model:
-  name: Qwen/Qwen3-1.7B
+  model_name_or_id: Qwen/Qwen3-1.7B
   attn_implementation: sdpa     # or flash_attention_2 with the flash-attn extra
 
 data:
-  train: data/train.jsonl
-  eval: data/eval.jsonl
+  train_jsonl_path: data/train.jsonl
+  eval_jsonl_path: data/eval.jsonl
 
 template:
   train_on_completions_only: true   # mask the prompt; train on the answer only

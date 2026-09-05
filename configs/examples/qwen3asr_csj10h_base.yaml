@@ -8,7 +8,7 @@ task: sft
 modality: speech
 
 model:
-  name: Qwen/Qwen3-1.7B
+  model_name_or_id: Qwen/Qwen3-1.7B
   attn_implementation: sdpa          # the LLM; the AuT is forced to FA2 for varlen
   torch_dtype: bfloat16
   gradient_checkpointing: true
@@ -18,7 +18,7 @@ special_tokens:
   additional: ["<audio>"]
 
 data:
-  corpus: csj                        # data_roots[csj] from data_root.yaml
+  root_key: csj                        # data_roots[csj] from data_root.yaml
   audio_field: audio
   response_field: text
   reference_field: text
@@ -36,11 +36,12 @@ speech:
     freeze: false                    # full FT: train the audio tower too
   projector:
     name: identity                   # the Qwen3-ASR projector lives inside the AuT
-  speed_perturb:
-    enabled: true
-    from_field: true                 # per-record "speed" (0.9/1.0/1.1) -> runtime resample
-    field_name: speed
 
+  augment:
+    speed_perturb:
+      enabled: true
+      from_field: true                 # per-record "speed" (0.9/1.0/1.1) -> runtime resample
+      field_name: speed
 template:
   train_on_completions_only: true    # system=instruction, user=<audio>, assistant=target
 

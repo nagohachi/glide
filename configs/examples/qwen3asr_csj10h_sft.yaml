@@ -3,8 +3,8 @@
 extends: [qwen3asr_csj10h_base.yaml]
 
 data:
-  train: native_sft_10h/train.jsonl   # 10h subset (scripts/build_csj_10h.py)
-  eval: native_sft/dev.jsonl
+  train_jsonl_path: native_sft_10h/train.jsonl   # 10h subset (scripts/build_csj_10h.py)
+  eval_jsonl_path: native_sft/dev.jsonl
 
 template:
   system_prompt: "Please transcribe the speech to text."

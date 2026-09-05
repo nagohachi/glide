@@ -218,7 +218,7 @@ def build_speech_llm(config):
     encoder = encoder.to(dtype)
 
     llm = transformers.AutoModelForCausalLM.from_pretrained(
-        config.model.name,
+        config.model.model_name_or_id,
         dtype=dtype,
         attn_implementation=config.model.attn_implementation,
         trust_remote_code=config.model.trust_remote_code,
@@ -232,7 +232,7 @@ def build_speech_llm(config):
     from transformers import AutoTokenizer
 
     tokenizer = AutoTokenizer.from_pretrained(
-        config.model.tokenizer_name or config.model.name,
+        config.model.tokenizer_name_or_id or config.model.model_name_or_id,
         trust_remote_code=config.model.trust_remote_code,
     )
     info = apply_special_tokens(tokenizer, llm, config.special_tokens)

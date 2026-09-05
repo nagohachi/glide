@@ -241,24 +241,63 @@ def load_config(
 
     config = dict_to_dataclass(GlideConfig, merged)
     _resolve_data_paths(config)
+    _validate_required(config)
     return config
 
 
-def _resolve_data_paths(config: GlideConfig) -> None:
-    """Prepend the corpus root to relative ``train``/``eval`` paths (in place).
+def _validate_required(config: GlideConfig) -> None:
+    """Reject sentinel values for fields that have no meaningful default.
 
-    The root is ``data_roots[data.corpus]`` when ``data.corpus`` is set, else the
-    explicit ``data.root``.
+    Some settings genuinely have no value that is right for every run (which model
+    to load, what attention kernel, the LoRA rank). Rather than shipping a default
+    that silently trains the wrong thing, the schema carries an explicit "not set"
+    sentinel and this check turns it into an error naming the YAML key.
+
+    Raises:
+        ValueError: listing every unset key, so one run surfaces all of them.
     """
-    if config.data.corpus:
-        if config.data.corpus not in config.data_roots:
+    missing: list[str] = []
+    if not config.model.model_name_or_id:
+        missing.append("model.model_name_or_id (HF hub id or local path of the base model)")
+    if not config.model.attn_implementation:
+        missing.append("model.attn_implementation (flash_attention_2 | sdpa | eager)")
+    if config.peft.enabled:
+        if config.peft.r < 0:
+            missing.append("peft.r (LoRA rank; required when peft.enabled)")
+        if config.peft.lora_alpha < 0:
+            missing.append("peft.lora_alpha (required when peft.enabled)")
+        if config.peft.target_modules is None:
+            missing.append(
+                "peft.target_modules (e.g. all-linear; required when peft.enabled)"
+            )
+    if config.speech.warmup.projector_only_steps > 0 and config.speech.warmup.projector_lr < 0:
+        missing.append(
+            "speech.warmup.projector_lr (required when speech.warmup.projector_only_steps > 0)"
+        )
+    if missing:
+        raise ValueError(
+            "Missing required config values:\n  - "
+            + "\n  - ".join(missing)
+            + "\nSet them in your YAML (configs/base.yaml carries the common ones) "
+            "or pass them as --dotted.key overrides."
+        )
+
+
+def _resolve_data_paths(config: GlideConfig) -> None:
+    """Prepend the data root to relative ``*_jsonl_path`` values (in place).
+
+    The root is ``data_roots[data.root_key]`` when ``data.root_key`` is set, else
+    the explicit ``data.root_dir``.
+    """
+    if config.data.root_key:
+        if config.data.root_key not in config.data_roots:
             raise ValueError(
-                f"data.corpus={config.data.corpus!r} not found in data_roots "
+                f"data.root_key={config.data.root_key!r} not found in data_roots "
                 f"{sorted(config.data_roots)}; define it in your data_root.yaml."
             )
-        root = config.data_roots[config.data.corpus]
+        root = config.data_roots[config.data.root_key]
     else:
-        root = config.data.root
+        root = config.data.root_dir
     if not root:
         return
 
@@ -269,9 +308,9 @@ def _resolve_data_paths(config: GlideConfig) -> None:
             return [_join(x) for x in p]
         return p if os.path.isabs(p) else os.path.join(root, p)
 
-    config.data.train = _join(config.data.train)
-    config.data.eval = _join(config.data.eval)
-    config.data.test = _join(config.data.test)
+    config.data.train_jsonl_path = _join(config.data.train_jsonl_path)
+    config.data.eval_jsonl_path = _join(config.data.eval_jsonl_path)
+    config.data.test_jsonl_path = _join(config.data.test_jsonl_path)
 
 
 # --------------------------------------------------------------------------- #
