@@ -239,10 +239,9 @@ def _relaunch_distributed(argv: list[str], dist_cfg, nproc: int) -> int:
     # Stamp the versioned output dir ONCE here (parent) so every torchrun worker
     # inherits the same value -> all ranks share one output dir (no per-rank timestamp).
     os.environ.setdefault("GLIDE_OUTPUT_STAMP", _dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
-    # NCCL logging default. Node-specific NCCL/allocator workarounds are deliberately
-    # NOT set here -- see docs/tutorials/faq.md for the ones you may want to export.
+    # NCCL logging default. Node-specific NCCL/allocator tuning is deliberately NOT
+    # set here -- see docs/tutorials/faq.md for the vars you may want to export.
     os.environ.setdefault("NCCL_DEBUG", "WARN")
-    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
     launch = [f"--nproc_per_node={nproc}"]
     if dist_cfg.nnodes > 1 or dist_cfg.master_addr:
