@@ -24,7 +24,11 @@ def build_reward_funcs(config: GlideConfig) -> tuple[list[Callable], list[float]
     for spec in config.rl.rewards:
         builder = rewards.get(spec.name)
         fn = builder(**spec.kwargs)
-        fn.__name__ = getattr(fn, "__name__", spec.name) or spec.name
+        # Name the reward by its spec name so TRL logs distinct rewards/{name}/mean
+        # series. Builders return a closure named "_reward", so the old
+        # getattr(fn, "__name__", ...) fallback always kept "_reward" and collapsed
+        # every reward into one colliding metric key.
+        fn.__name__ = spec.name
         funcs.append(fn)
         weights.append(spec.weight)
     return funcs, weights
