@@ -1,0 +1,70 @@
+# Shared base for the CSJ-10h composed Speech-LLM runs:
+#   Qwen3-ASR AuT + Qwen3-ASR projector (bundled in the AuT) + Qwen3-1.7B, full FT.
+# The sft / think run configs `extends` this and override ONLY their differences.
+# Env: .venv-qwenasr (qwen_asr + transformers 4.57.6).
+extends: [../data_root.yaml, ../base.yaml]
+
+task: sft
+modality: speech
+
+model:
+  name: Qwen/Qwen3-1.7B
+  attn_implementation: sdpa          # the LLM; the AuT is forced to FA2 for varlen
+  torch_dtype: bfloat16
+  gradient_checkpointing: true
+
+special_tokens:
+  audio_token: "<audio>"             # marker spliced with projected audio frames
+  additional: ["<audio>"]
+
+data:
+  corpus: csj                        # data_roots[csj] from data_root.yaml
+  audio_field: audio
+  response_field: text
+  reference_field: text
+  max_eval_samples: 500              # cap eval (AR generation is slow)
+
+speech:
+  enabled: true
+  task: recognition
+  sample_rate: 16000
+  length_grouped_sampler: true
+  max_tokens_per_batch: 1200000       # 75s audio/device-batch
+  encoder:
+    name: qwen3_asr_aut              # FA2 varlen, leak-free; pretrained AuT (+ proj1/proj2)
+    pretrained: Qwen/Qwen3-ASR-1.7B
+    freeze: false                    # full FT: train the audio tower too
+  projector:
+    name: identity                   # the Qwen3-ASR projector lives inside the AuT
+  speed_perturb:
+    enabled: true
+    from_field: true                 # per-record "speed" (0.9/1.0/1.1) -> runtime resample
+    field_name: speed
+
+template:
+  train_on_completions_only: true    # system=instruction, user=<audio>, assistant=target
+
+eval:
+  generate:
+    enabled: true                    # AR-decode the dev set for CER/WER
+  metrics: [cer, wer]
+
+logging:
+  report_to: [wandb, tensorboard]
+  project: glide-csj10h
+
+training:
+  per_device_train_batch_size: 48
+  gradient_accumulation_steps: 1
+  lr_scheduler_type: cosine
+  logging_steps: 20
+  eval_strategy: steps
+  eval_steps: 1000
+  per_device_eval_batch_size: 8
+  save_strategy: steps
+  save_steps: 1000
+  save_total_limit: 3
+  bf16: true
+
+distributed:
+  nproc_per_node: null               # auto = the 6 GPUs wait_gpu allocates
