@@ -16,6 +16,10 @@ from trl import SFTTrainer
 from ..config.schema import ProjectorWarmupConfig
 from ..data.sampler import LengthGroupedBatchSampler
 
+from ..logging_utils import get_logger
+
+_log = get_logger("trainers")
+
 __all__ = ["LengthGroupedSFTTrainer", "projector_warmup_lambdas", "_EpochShuffleCallback"]
 
 
@@ -152,7 +156,7 @@ class LengthGroupedSFTTrainer(SFTTrainer):
         )
         self.optimizer = optimizer
         if self.args.process_index == 0:
-            print(f"[glide][warmup] projector group: {sum(p.numel() for p in proj):,} params | "
+            _log.info(f"warmup: projector group: {sum(p.numel() for p in proj):,} params | "
                   f"rest: {sum(p.numel() for p in rest):,} params", flush=True)
         return optimizer
 
@@ -175,7 +179,7 @@ class LengthGroupedSFTTrainer(SFTTrainer):
             warmup_ratio=self._glide_warmup_ratio,
         )
         if self.args.process_index == 0:
-            print(f"[glide][warmup] P={w.projector_only_steps} (proj 0->{w.projector_lr:g}), "
+            _log.info(f"warmup: P={w.projector_only_steps} (proj 0->{w.projector_lr:g}), "
                   f"then 0->{target_lr:g}, decay to 0 by {num_training_steps}", flush=True)
         scheduler = LambdaLR(opt, [proj_lam, rest_lam])
         self.lr_scheduler = scheduler

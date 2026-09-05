@@ -21,6 +21,10 @@ from ..config.schema import AudioEncoderConfig
 from ..registry import audio_encoders
 from .plugins_base import AudioEncoder
 
+from ..logging_utils import get_logger
+
+_log = get_logger("models")
+
 __all__ = ["WhisperEncoder", "WaveformEncoder"]
 
 
@@ -157,8 +161,10 @@ def build_qwen3_asr_aut(cfg: AudioEncoderConfig, sample_rate: int = 16000):
             if hasattr(_m, "_attn_implementation"):
                 _m._attn_implementation = "flash_attention_2"
         use_varlen = getattr(tower.config, "_attn_implementation", None) == "flash_attention_2"
-    print(f"[glide] qwen3_asr_aut: {'FA2 varlen (batched, leak-free)' if use_varlen else 'per-audio loop (sdpa fallback)'}",
-          flush=True)
+    _log.info(
+        "qwen3_asr_aut: %s",
+        "FA2 varlen (batched, leak-free)" if use_varlen else "per-audio loop (sdpa fallback)",
+    )
 
     class _Tower(AudioEncoder):
         input_kind = "input_features"

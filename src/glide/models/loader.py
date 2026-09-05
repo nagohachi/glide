@@ -17,6 +17,10 @@ from typing import Any
 from ..config.schema import GlideConfig, Modality
 from .special_tokens import SpecialTokenInfo, apply_special_tokens
 
+from ..logging_utils import get_logger
+
+_log = get_logger("models")
+
 __all__ = ["load_model_and_processor", "LoadedModel", "resolve_dtype"]
 
 _DEFAULT_AUTO_CLASS = {
@@ -161,12 +165,12 @@ def _maybe_load_state_dict(model, path: str | None) -> None:
         state = state["state_dict"]
     result = model.load_state_dict(state, strict=False)
     missing, unexpected = list(result.missing_keys), list(result.unexpected_keys)
-    print(f"[glide] loaded state_dict from {path} "
+    _log.info(f"loaded state_dict from {path} "
           f"(missing={len(missing)}, unexpected={len(unexpected)})")
     if missing:
-        print(f"[glide]   first missing: {missing[:8]}")
+        _log.info(f"  first missing: {missing[:8]}")
     if unexpected:
-        print(f"[glide]   first unexpected: {unexpected[:8]}")
+        _log.info(f"  first unexpected: {unexpected[:8]}")
 
 
 def _propagate_attn_implementation(hf_config, impl: str) -> None:

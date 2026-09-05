@@ -25,6 +25,10 @@ import sys
 
 from .. import __version__
 
+from ..logging_utils import get_logger, init_logging
+
+_log = get_logger("cli")
+
 __all__ = ["Command", "TrainCommand", "EvalCommand", "TestCommand", "DocsCommand",
            "COMMANDS", "main"]
 
@@ -111,8 +115,8 @@ class TrainCommand(_ConfigCommand):
             return max(1, ngpu)
         n = int(dist_cfg.nproc_per_node)
         if ngpu and n > ngpu:
-            print(
-                f"[glide] distributed.nproc_per_node={n} > visible GPUs ({ngpu}); "
+            _log.warning(
+                f"distributed.nproc_per_node={n} > visible GPUs ({ngpu}); "
                 f"clamping to {ngpu}."
             )
             n = ngpu
@@ -127,7 +131,7 @@ class TrainCommand(_ConfigCommand):
         from ..config.schema import Modality
 
         if config.modality is Modality.SPEECH and self.name in ("grpo", "gspo") and nproc > 1:
-            print("[glide] speech RL is single-GPU only; not launching under torchrun "
+            _log.warning("speech RL is single-GPU only; not launching under torchrun "
                   "(pin distributed.nproc_per_node: 1 to silence this).")
             return 1
         return nproc
@@ -160,7 +164,7 @@ class TrainCommand(_ConfigCommand):
         else:
             launch.append("--standalone")
         launch += ["--module", "glide.cli.main", *argv]
-        print(f"[glide] launching distributed ({nproc} proc/node): torchrun {' '.join(launch)}")
+        _log.info(f"launching distributed ({nproc} proc/node): torchrun {' '.join(launch)}")
         torchrun_main(launch)
         return 0
 
@@ -178,13 +182,13 @@ class TrainCommand(_ConfigCommand):
         trainer = build_trainer(config)
         output_dir = trainer.args.output_dir
         snapshot_config(config, output_dir)
-        print(f"[glide] {self.name} -> output_dir={output_dir}")
+        _log.info(f"{self.name} -> output_dir={output_dir}")
 
         trainer.train()
         trainer.save_model(output_dir)
         if getattr(trainer, "processing_class", None) is not None:
             trainer.processing_class.save_pretrained(output_dir)
-        print(f"[glide] done. Model saved to {output_dir}")
+        _log.info(f"done. Model saved to {output_dir}")
         return 0
 
 
@@ -245,10 +249,7 @@ class _GenerationCommand(_ConfigCommand):
 
         paths = getattr(config.data, f"{self.split}_jsonl_path")
         if paths is None:
-            print(
-                f"[glide] no data.{self.split}_jsonl_path configured; nothing to evaluate.",
-                file=sys.stderr,
-            )
+            _log.error("no data.%s_jsonl_path configured; nothing to evaluate.", self.split)
             return 1
         if not isinstance(paths, list):
             paths = [paths]
@@ -261,7 +262,7 @@ class _GenerationCommand(_ConfigCommand):
             config, loaded.processor, records, cap_samples=(self.split == "eval")
         )
         metrics = evaluator.evaluate(loaded.model, save_path=output, prefix=self.split)
-        print(f"[glide][{self.split}]", metrics)
+        _log.info("%s metrics: %s", self.split, metrics)
         return 0
 
 
@@ -320,8 +321,8 @@ class DocsCommand(Command):
         # dir is given; the old pdoc3 `--http :8080` flag no longer exists.
         if not args.serve:
             cmd += ["-o", args.output]
-        print(
-            f"[glide] generating docs for {len(modules)} modules -> "
+        _log.info(
+            f"generating docs for {len(modules)} modules -> "
             f"{'http://localhost:8080' if args.serve else args.output}"
         )
         return subprocess.call(cmd)
@@ -364,6 +365,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the ``glide`` console script."""
+    init_logging()
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = _build_parser()
     args, overrides = parser.parse_known_args(argv)
