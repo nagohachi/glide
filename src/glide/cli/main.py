@@ -239,10 +239,8 @@ def _relaunch_distributed(argv: list[str], dist_cfg, nproc: int) -> int:
     # Stamp the versioned output dir ONCE here (parent) so every torchrun worker
     # inherits the same value -> all ranks share one output dir (no per-rank timestamp).
     os.environ.setdefault("GLIDE_OUTPUT_STAMP", _dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
-    # Cluster NCCL/runtime defaults so `glide sft <cfg>` runs under wait_gpu with no
-    # wrapper script: InfiniBand off, expandable CUDA allocator. P2P stays at NCCL's
-    # default (on); export NCCL_P2P_DISABLE=1 yourself for a host with broken PCIe P2P.
-    os.environ.setdefault("NCCL_IB_DISABLE", "1")
+    # NCCL logging default. Node-specific NCCL/allocator workarounds are deliberately
+    # NOT set here -- see docs/tutorials/faq.md for the ones you may want to export.
     os.environ.setdefault("NCCL_DEBUG", "WARN")
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
