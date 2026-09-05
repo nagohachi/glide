@@ -201,7 +201,7 @@ class PackingConfig:
 
     enabled: bool = False
     #: ``ffd`` (first-fit-decreasing) or ``wrapped``; matches TRL's options.
-    strategy: str = "ffd"
+    strategy: Literal["ffd", "wrapped"] = "ffd"
     max_length: int | None = None
 
 
