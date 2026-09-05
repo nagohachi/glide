@@ -1,0 +1,105 @@
+[project]
+name = "glide"
+version = "0.1.0"
+description = "A TRL-based post-training library specialized in LLM / Speech-LLM / Vision-LLM SFT and RL (GRPO, GSPO)."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "magoshi" }]
+
+# Core dependencies. These are CPU-importable so that the non-GPU test suite
+# can run without CUDA. PyTorch itself is pulled in through the cu126 / cu130
+# extras below (see [tool.uv]) so the right CUDA build is selected explicitly.
+dependencies = [
+    "transformers>=4.51",
+    "trl>=0.15",
+    "peft>=0.13",
+    "accelerate>=1.0",
+    "datasets>=3.0",
+    "pyyaml>=6.0",
+    "numpy>=1.26",
+    "jiwer>=3.0",          # WER / CER
+    "sacrebleu>=2.4",      # BLEU
+    "rouge-score>=0.1.2",  # ROUGE
+    "soundfile>=0.12",     # audio I/O (libsndfile)
+    "librosa>=0.10",       # audio resampling / feature helpers
+    "wandb>=0.17",
+    "tensorboard>=2.16",
+]
+
+[project.optional-dependencies]
+# --- CUDA build selection (mutually exclusive, see [tool.uv].conflicts) ---
+# `uv sync --extra cu126`  -> CUDA 12.6 build
+# `uv sync --extra cu130`  -> CUDA 13.0 build (also: `module switch cuda/13.0`)
+cu126 = ["torch>=2.7", "torchaudio>=2.7", "torchvision>=0.22"]
+cu130 = ["torch>=2.7", "torchaudio>=2.7", "torchvision>=0.22"]
+
+# Flash-Attention has no prebuilt wheel for bleeding-edge torch, so it cannot be
+# resolved by plain `uv sync` -- it must be compiled after torch is installed,
+# with --no-build-isolation. Install it manually (see README). Verified build:
+# flash-attn 2.8.3.post1 against torch 2.11+cu126. Listed here for reference only.
+flash-attn = ["flash-attn==2.8.3.post1; sys_platform == 'linux'"]
+
+# vLLM-backed rollout for RL (optional; large dependency).
+vllm = ["vllm>=0.6"]
+
+# Documentation generation from source + docstrings.
+docs = ["pdoc>=14.0"]
+
+# Test / dev tooling.
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.6"]
+
+[project.scripts]
+glide = "glide.cli.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/glide"]
+
+# ---------------------------------------------------------------------------
+# uv configuration: two mutually-exclusive CUDA builds resolved from the
+# matching PyTorch wheel index. This is the documented uv multi-CUDA pattern.
+# ---------------------------------------------------------------------------
+[tool.uv]
+# torch must never be resolved for both CUDA variants at once.
+conflicts = [[{ extra = "cu126" }, { extra = "cu130" }]]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu126", extra = "cu126" },
+    { index = "pytorch-cu130", extra = "cu130" },
+]
+torchaudio = [
+    { index = "pytorch-cu126", extra = "cu126" },
+    { index = "pytorch-cu130", extra = "cu130" },
+]
+torchvision = [
+    { index = "pytorch-cu126", extra = "cu126" },
+    { index = "pytorch-cu130", extra = "cu130" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: tests that require a CUDA GPU (deselect with '-m \"not gpu\"')",
+    "slow: tests that download models or run real training steps",
+]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["scratch"]  # throwaway diagnostic / one-off scripts, not library code
