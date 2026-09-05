@@ -24,6 +24,10 @@ from ..data.audio import load_audio
 from ..data.template import build_prompt_messages, extract_reference
 from ..metrics.text_metrics import build_metric_fn
 
+from ..logging_utils import get_logger
+
+_log = get_logger("eval")
+
 __all__ = ["GenerationEvaluator", "GenerateEvalCallback", "TestEvalCallback"]
 
 
@@ -228,7 +232,7 @@ class GenerateEvalCallback(TrainerCallback):
                 self._trainer.log(metrics)
             else:
                 state.log_history.append({**metrics, "step": state.global_step})
-                print(f"[glide][generate-eval] step {state.global_step}: {metrics}")
+                _log.info(f"generate-eval: step {state.global_step}: {metrics}")
 
 
 class TestEvalCallback(TrainerCallback):
@@ -252,4 +256,4 @@ class TestEvalCallback(TrainerCallback):
                 self._trainer.log(metrics)
             else:
                 state.log_history.append({**metrics, "step": state.global_step})
-                print(f"[glide][test-eval] step {state.global_step}: {metrics}")
+                _log.info(f"test-eval: step {state.global_step}: {metrics}")
