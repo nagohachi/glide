@@ -44,21 +44,19 @@ class SpeechTask(StrEnum):
 class ModelConfig:
     """How to load the base model, tokenizer and (multimodal) processor."""
 
-    #: HF hub id or local path of the base model.
     name: str = "Qwen/Qwen3-1.7B"
-    #: Separate tokenizer/processor path; defaults to ``name``.
+    #: Defaults to the model path when unset.
     tokenizer_name: str | None = None
     #: ``flash_attention_2`` | ``sdpa`` | ``eager``. ``flash_attention_2`` requires
     #: the ``flash-attn`` extra and a compatible GPU.
     attn_implementation: str = "sdpa"
     #: ``bfloat16`` | ``float16`` | ``float32`` | ``auto``.
     torch_dtype: str = "bfloat16"
-    #: Trust remote code when loading custom model classes from the hub.
     trust_remote_code: bool = False
     #: Load in 4/8-bit (requires bitsandbytes). ``None`` disables quantization.
     load_in_4bit: bool = False
     load_in_8bit: bool = False
-    #: Gradient checkpointing toggle (also settable under ``training``).
+    #: Also settable under ``training``.
     gradient_checkpointing: bool = False
     #: Optional explicit AutoModel class name to use (e.g.
     #: ``AutoModelForImageTextToText``). When ``None`` it is inferred from the
