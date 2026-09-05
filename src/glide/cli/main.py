@@ -98,7 +98,7 @@ def _run_eval(config_path, overrides: list[str], checkpoint: str | None = None) 
     from ..trainers.common import init_plugins
 
     if checkpoint:
-        overrides = [*overrides, f"model.name={checkpoint}"]
+        overrides = [*overrides, f"--model.name={checkpoint}"]
     config = load_config(config_path, overrides, task="sft")
     config.eval.generate.enabled = True
     init_plugins(config)
@@ -129,7 +129,7 @@ def _run_test(
     from ..trainers.common import init_plugins
 
     if checkpoint:
-        overrides = [*overrides, f"model.name={checkpoint}"]
+        overrides = [*overrides, f"--model.name={checkpoint}"]
     config = load_config(config_path, overrides, task="sft")
     config.eval.generate.enabled = True
     init_plugins(config)
