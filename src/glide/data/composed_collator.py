@@ -134,7 +134,7 @@ class ComposedSpeechCollator:
         # target), and (c) diverge from generation_inputs (also add_special_tokens=False).
         enc = self.tokenizer(texts, return_tensors="pt", padding=True, add_special_tokens=False)
         batch = {"input_ids": enc["input_ids"], "attention_mask": enc["attention_mask"]}
-        batch["labels"] = self._labels(enc["input_ids"], prefix_lens)
+        batch["labels"] = self._labels(enc["input_ids"], enc["attention_mask"], prefix_lens)
 
         feats = self.feature_extractor(wavs, sampling_rate=self.sample_rate, return_tensors="pt")
         if self.input_kind == "input_features":
@@ -159,11 +159,13 @@ class ComposedSpeechCollator:
                 batch["audio_attention_mask"] = feats["attention_mask"]
         return batch
 
-    def _labels(self, input_ids, prefix_lens) -> torch.Tensor:
+    def _labels(self, input_ids, attention_mask, prefix_lens) -> torch.Tensor:
         labels = input_ids.clone()
-        pad_id = self.tokenizer.pad_token_id
-        if pad_id is not None:
-            labels[input_ids == pad_id] = -100
+        # Mask padding by attention_mask (position-based), NOT by pad_token_id: when a
+        # base model has no pad token, ensure_special_tokens sets pad_token = eos_token,
+        # so masking by id would also erase the genuine response-terminating EOS and the
+        # model would never learn to stop. attention_mask==0 hits only real padding.
+        labels[attention_mask == 0] = -100
         if not self.completion_only:
             return labels
         if self._resp_ids:  # explicit marker (back-compat): mask up to its last occurrence
