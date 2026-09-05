@@ -271,6 +271,7 @@ def _resolve_data_paths(config: GlideConfig) -> None:
 
     config.data.train = _join(config.data.train)
     config.data.eval = _join(config.data.eval)
+    config.data.test = _join(config.data.test)
 
 
 # --------------------------------------------------------------------------- #
