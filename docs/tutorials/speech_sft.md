@@ -54,7 +54,8 @@ speech:
     freeze: false
   projector:
     name: identity                  # built-in: identity | mlp_gelu | qwen3_asr_proj
-  speed_perturb: { enabled: true, from_field: true, field_name: speed }
+  augment:
+    speed_perturb: { enabled: true, from_field: true, field_name: speed }
 
 template:
   system_prompt: "Please transcribe the speech to text."   # the instruction (system turn)

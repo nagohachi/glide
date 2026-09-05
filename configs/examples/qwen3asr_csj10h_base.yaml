@@ -36,11 +36,12 @@ speech:
     freeze: false                    # full FT: train the audio tower too
   projector:
     name: identity                   # the Qwen3-ASR projector lives inside the AuT
-  speed_perturb:
-    enabled: true
-    from_field: true                 # per-record "speed" (0.9/1.0/1.1) -> runtime resample
-    field_name: speed
 
+  augment:
+    speed_perturb:
+      enabled: true
+      from_field: true                 # per-record "speed" (0.9/1.0/1.1) -> runtime resample
+      field_name: speed
 template:
   train_on_completions_only: true    # system=instruction, user=<audio>, assistant=target
 

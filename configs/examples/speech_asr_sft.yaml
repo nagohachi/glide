@@ -28,9 +28,10 @@ speech:
   task: recognition
   sample_rate: 16000
   length_grouped_sampler: true       # similar-length batches; order varies per epoch
-  specaugment:
-    enabled: true
 
+  augment:
+    specaugment:
+      enabled: true
 template:
   train_on_completions_only: true
   response_template: "<|im_start|>assistant\n"   # used for completion-only masking

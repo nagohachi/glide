@@ -35,14 +35,6 @@ speech:
     name: mlp_gelu                        # mlp_gelu (scratch) | qwen3_asr_proj | qwen_omni_proj
     num_layers: 2
     downsample: 5                         # stack 5 frames -> 5x shorter audio sequence
-  specaugment:
-    enabled: true
-    num_freq_mask: 2
-    num_time_mask: 5
-  speed_perturb:
-    enabled: true
-    from_field: true                      # use each record's "speed" (CSJ native_sft style)
-    factors: [0.9, 1.0, 1.1]
   warmup:                                 # projector-only warmup -> full fine-tuning
     projector_only_steps: 1000            # phase 1: train ONLY the projector
     projector_lr: 1.0e-4                  # phase-1 projector LR
@@ -50,6 +42,15 @@ speech:
     # projector_patterns defaults cover both the composed projector and Qwen3-ASR's
     # audio_tower.proj1/proj2 -- override if your projector lives elsewhere.
 
+  augment:
+    specaugment:
+      enabled: true
+      num_freq_mask: 2
+      num_time_mask: 5
+    speed_perturb:
+      enabled: true
+      from_field: true                      # use each record's "speed" (CSJ native_sft style)
+      factors: [0.9, 1.0, 1.1]
 template:
   system_prompt: ""
   train_on_completions_only: true   # composed collator masks the chat-template prompt

@@ -315,6 +315,16 @@ class ProjectorWarmupConfig:
 
 
 @dataclass
+class AudioAugmentConfig:
+    """Waveform / feature augmentations, applied to training batches only."""
+
+    #: Feature-domain masking on log-mel inputs.
+    specaugment: SpecAugmentConfig = field(default_factory=SpecAugmentConfig)
+    #: Waveform-domain resampling.
+    speed_perturb: SpeedPerturbConfig = field(default_factory=SpeedPerturbConfig)
+
+
+@dataclass
 class SpeechConfig:
     """Speech-modality settings, including composable encoder/projector/LLM.
 
@@ -341,9 +351,8 @@ class SpeechConfig:
     #: set, the per-device batch size *varies* (more short utterances per batch).
     #: ``per_device_train_batch_size`` then acts as a hard cap on the count.
     max_tokens_per_batch: int | None = None
-    #: SpecAugment and speed-perturbation augmentations.
-    specaugment: SpecAugmentConfig = field(default_factory=SpecAugmentConfig)
-    speed_perturb: SpeedPerturbConfig = field(default_factory=SpeedPerturbConfig)
+    #: Training-time audio augmentations (see :class:`AudioAugmentConfig`).
+    augment: AudioAugmentConfig = field(default_factory=AudioAugmentConfig)
     #: Two-phase projector-warmup -> full fine-tuning schedule.
     warmup: ProjectorWarmupConfig = field(default_factory=ProjectorWarmupConfig)
 

@@ -149,7 +149,7 @@ class ComposedSpeechCollator:
         else:
             if self.train and self.specaugment is not None and self.specaugment.enabled:
                 warnings.warn(
-                    "speech.specaugment is enabled but the encoder consumes raw waveforms "
+                    "speech.augment.specaugment is enabled but the encoder consumes raw waveforms "
                     "(input_values, e.g. WavLM/XLS-R); SpecAugment only applies to log-mel "
                     "input_features and is being ignored.",
                     stacklevel=2,
