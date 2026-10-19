@@ -96,7 +96,7 @@ sub-config**, not the whole `GlideConfig`, plus the encoder and LLM widths.
 from glide.registry import projectors
 
 @projectors.register("my_proj")
-def build_my_proj(cfg, in_dim, out_dim):
+def build_my_projector(cfg, in_dim, out_dim):
     return MyProjector(in_dim, out_dim, downsample=cfg.downsample)
 ```
 
@@ -114,9 +114,9 @@ from glide.registry import rewards
 
 @rewards.register("my_reward")
 def build_my_reward(scale: float = 1.0):
-    def _reward(prompts, completions, completion_ids=None, **columns):
+    def _compute_reward(prompts, completions, completion_ids=None, **columns):
         return [scale * len(c) for c in completions]
-    return _reward
+    return _compute_reward
 ```
 
 ```yaml

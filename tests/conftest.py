@@ -56,17 +56,17 @@ def fast_tokenizer():
 
 
 @pytest.fixture
-def jsonl_file(tmp_path):
+def write_jsonl_file(tmp_path):
     """Factory writing records to a temp JSONL file and returning its path."""
 
-    def _make(records, name="data.jsonl"):
+    def _write(records, name="data.jsonl"):
         path = tmp_path / name
         with open(path, "w") as f:
             for r in records:
                 f.write(json.dumps(r) + "\n")
         return str(path)
 
-    return _make
+    return _write
 
 
 def pytest_collection_modifyitems(config, items):

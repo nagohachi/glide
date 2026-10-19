@@ -16,7 +16,7 @@ built-in transformers model), so this plugin:
 Use it from a config::
 
     plugins: ["examples/src/qwen3_asr_plugin.py"]
-    model: { name: Qwen/Qwen3-ASR-1.7B, auto_class: AutoModel }
+    model: { model_name_or_id: Qwen/Qwen3-ASR-1.7B, auto_class: AutoModel }
     template: { collator: qwen3_asr, system_prompt: "Transcribe the audio." }
     data: { audio_field: audio, response_field: text }
 
@@ -59,6 +59,14 @@ def _register_qwen3_asr() -> None:
     _patch_forward(backend.Qwen3ASRForConditionalGeneration)
 
 
+def _build_prefix_messages(system_prompt: str) -> list[dict]:
+    """System + audio-only user turn: the prompt both collators render and mask."""
+    return [
+        {"role": "system", "content": system_prompt or ""},
+        {"role": "user", "content": [{"type": "audio", "audio": None}]},
+    ]
+
+
 def _patch_forward(cls) -> None:
     """Make the outer model forward delegate to ``thinker.forward`` (once)."""
     if getattr(cls, "_glide_forward_patched", False):
@@ -89,17 +97,12 @@ class Qwen3ASRCollator:
     system_prompt: str = ""
     sampling_rate: int = 16000
 
-    def _prefix_messages(self):
-        return [
-            {"role": "system", "content": self.system_prompt or ""},
-            {"role": "user", "content": [{"type": "audio", "audio": None}]},
-        ]
-
     def __call__(self, features: list[dict]) -> dict:
         tokenizer = self.processor.tokenizer
         eos = tokenizer.eos_token or ""
         prefix_text = self.processor.apply_chat_template(
-            [self._prefix_messages()], add_generation_prompt=True, tokenize=False
+            [_build_prefix_messages(self.system_prompt)], add_generation_prompt=True,
+            tokenize=False,
         )[0]
 
         audios = [load_audio(f[self.audio_field], self.sampling_rate) for f in features]
@@ -154,20 +157,16 @@ class Qwen3ASRPackedCollator:
     sampling_rate: int = 16000
     attn_mode: str = "sdpa"  # "sdpa" | "fa2"
 
-    def _prefix_text(self):
-        msgs = [
-            {"role": "system", "content": self.system_prompt or ""},
-            {"role": "user", "content": [{"type": "audio", "audio": None}]},
-        ]
+    def _render_prefix_text(self):
         return self.processor.apply_chat_template(
-            [msgs], add_generation_prompt=True, tokenize=False
+            [_build_prefix_messages(self.system_prompt)], add_generation_prompt=True,
+            tokenize=False,
         )[0]
 
     def __call__(self, features: list[dict]) -> dict:
-
         tok = self.processor.tokenizer
         eos = tok.eos_token or ""
-        prefix = self._prefix_text()
+        prefix = self._render_prefix_text()
         audios = [load_audio(f[self.audio_field], self.sampling_rate) for f in features]
         targets = [f[self.target_field] for f in features]
 
@@ -230,6 +229,17 @@ class Qwen3ASRPackedCollator:
         return packed
 
 
+def _collect_collator_kwargs(config, processor) -> dict:
+    """The collator fields every Qwen3-ASR builder fills from the glide config."""
+    return dict(
+        processor=processor,
+        audio_field=config.data.audio_field,
+        target_field=config.data.response_field,
+        system_prompt=config.template.system_prompt or "",
+        sampling_rate=config.speech.sample_rate,
+    )
+
+
 @collators.register("qwen3_asr_packed", exist_ok=True)
 def build_qwen3_asr_packed_collator(config, processor):
     """Builder for the packing collator (``template.collator: qwen3_asr_packed``).
@@ -248,14 +258,7 @@ def build_qwen3_asr_packed_collator(config, processor):
             "across packed examples. Use sdpa/eager, or implement a cu_seqlens "
             "(varlen) packing path for FA2."
         )
-    return Qwen3ASRPackedCollator(
-        processor=processor,
-        audio_field=config.data.audio_field,
-        target_field=config.data.response_field,
-        system_prompt=config.template.system_prompt or "",
-        sampling_rate=config.speech.sample_rate,
-        attn_mode="sdpa",
-    )
+    return Qwen3ASRPackedCollator(**_collect_collator_kwargs(config, processor), attn_mode="sdpa")
 
 
 @collators.register("qwen3_asr_packed_fa2", exist_ok=True)
@@ -272,27 +275,14 @@ def build_qwen3_asr_packed_fa2_collator(config, processor):
             "qwen3_asr_packed_fa2 requires model.attn_implementation="
             f"'flash_attention_2': got {config.model.attn_implementation!r}."
         )
-    return Qwen3ASRPackedCollator(
-        processor=processor,
-        audio_field=config.data.audio_field,
-        target_field=config.data.response_field,
-        system_prompt=config.template.system_prompt or "",
-        sampling_rate=config.speech.sample_rate,
-        attn_mode="fa2",
-    )
+    return Qwen3ASRPackedCollator(**_collect_collator_kwargs(config, processor), attn_mode="fa2")
 
 
 @collators.register("qwen3_asr", exist_ok=True)
 def build_qwen3_asr_collator(config, processor):
     """Builder used by glide's SFT path (``template.collator: qwen3_asr``)."""
     _register_qwen3_asr()
-    return Qwen3ASRCollator(
-        processor=processor,
-        audio_field=config.data.audio_field,
-        target_field=config.data.response_field,
-        system_prompt=config.template.system_prompt or "",
-        sampling_rate=config.speech.sample_rate,
-    )
+    return Qwen3ASRCollator(**_collect_collator_kwargs(config, processor))
 
 
 # Register at import so the Auto classes are ready before the model loads.

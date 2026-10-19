@@ -13,9 +13,9 @@ per sample. To add your own, register a builder in your plugin module::
 
     @rewards.register("my_reward")
     def build_my_reward(scale: float = 1.0):
-        def _reward(prompts, completions, **kw):
+        def _compute_reward(prompts, completions, **kw):
             return [scale * f(c) for c in completions]
-        return _reward
+        return _compute_reward
 """
 
 import re
@@ -23,11 +23,11 @@ from typing import Any, Callable
 
 from ..registry import rewards
 
-__all__ = ["completion_text", "build_format_reward", "build_length_reward",
+__all__ = ["extract_completion_text", "build_format_reward", "build_length_reward",
            "build_exact_match_reward", "build_cer_reward"]
 
 
-def completion_text(completion: Any) -> str:
+def extract_completion_text(completion: Any) -> str:
     """Extract the assistant text from a TRL completion (str or message list)."""
     if isinstance(completion, str):
         return completion
@@ -58,25 +58,25 @@ def build_format_reward(pattern: str = r"<think>.*?</think>", flags: str = "s") 
     re_flags |= re.M if "m" in flags else 0
     compiled = re.compile(pattern, re_flags)
 
-    def _reward(prompts=None, completions=None, **kwargs):
+    def _compute_reward(prompts=None, completions=None, **kwargs):
         completions = completions or []
-        return [1.0 if compiled.search(completion_text(c)) else 0.0 for c in completions]
+        return [1.0 if compiled.search(extract_completion_text(c)) else 0.0 for c in completions]
 
-    return _reward
+    return _compute_reward
 
 
 @rewards.register("length")
 def build_length_reward(target: int = 256, scale: float = 0.001) -> Callable:
     """Reward proximity of completion length (chars) to ``target`` (mild shaping)."""
 
-    def _reward(prompts=None, completions=None, **kwargs):
+    def _compute_reward(prompts=None, completions=None, **kwargs):
         completions = completions or []
         return [
-            max(0.0, 1.0 - scale * abs(len(completion_text(c)) - target))
+            max(0.0, 1.0 - scale * abs(len(extract_completion_text(c)) - target))
             for c in completions
         ]
 
-    return _reward
+    return _compute_reward
 
 
 @rewards.register("exact_match")
@@ -84,20 +84,20 @@ def build_exact_match_reward(reference_key: str = "reference", normalize: bool =
     """Reward 1.0 when the completion exactly matches the reference column."""
     from ..metrics.text_metrics import normalize_text
 
-    def _reward(prompts=None, completions=None, **kwargs):
+    def _compute_reward(prompts=None, completions=None, **kwargs):
         completions = completions or []
         refs = kwargs.get(reference_key)
         if refs is None:
             return [0.0] * len(completions)
         out = []
         for c, r in zip(completions, refs):
-            pred = completion_text(c)
+            pred = extract_completion_text(c)
             if normalize:
                 pred, r = normalize_text(pred), normalize_text(r or "")
             out.append(1.0 if pred == r else 0.0)
         return out
 
-    return _reward
+    return _compute_reward
 
 
 @rewards.register("cer")
@@ -107,14 +107,14 @@ def build_cer_reward(reference_key: str = "reference", normalize: bool = True) -
 
     from ..metrics.text_metrics import normalize_text
 
-    def _reward(prompts=None, completions=None, **kwargs):
+    def _compute_reward(prompts=None, completions=None, **kwargs):
         completions = completions or []
         refs = kwargs.get(reference_key)
         if refs is None:
             return [0.0] * len(completions)
         out = []
         for c, r in zip(completions, refs):
-            pred, ref = completion_text(c), (r or "")
+            pred, ref = extract_completion_text(c), (r or "")
             if normalize:
                 pred, ref = normalize_text(pred), normalize_text(ref)
             if not ref:
@@ -124,4 +124,4 @@ def build_cer_reward(reference_key: str = "reference", normalize: bool = True) -
             out.append(max(0.0, 1.0 - float(cer)))
         return out
 
-    return _reward
+    return _compute_reward

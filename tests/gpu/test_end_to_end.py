@@ -74,9 +74,9 @@ def _run(config) -> None:
 
 
 @pytest.mark.slow
-def test_sft_text_end_to_end_cpu(tmp_path, fast_tokenizer, jsonl_file):
+def test_sft_text_end_to_end_cpu(tmp_path, fast_tokenizer, write_jsonl_file):
     records = [{"prompt": "hello", "response": "world"} for _ in range(8)]
-    train = jsonl_file(records)
+    train = write_jsonl_file(records)
     model_dir = _build_tiny_model_dir(tmp_path, fast_tokenizer)
     config = _make_config(model_dir, train, str(tmp_path / "out"), bf16=False)
     config.training["use_cpu"] = True
@@ -84,9 +84,9 @@ def test_sft_text_end_to_end_cpu(tmp_path, fast_tokenizer, jsonl_file):
 
 
 @pytest.mark.gpu
-def test_sft_text_end_to_end_gpu(tmp_path, fast_tokenizer, jsonl_file):
+def test_sft_text_end_to_end_gpu(tmp_path, fast_tokenizer, write_jsonl_file):
     records = [{"prompt": "hello", "response": "world"} for _ in range(8)]
-    train = jsonl_file(records)
+    train = write_jsonl_file(records)
     model_dir = _build_tiny_model_dir(tmp_path, fast_tokenizer)
     config = _make_config(model_dir, train, str(tmp_path / "out"), bf16=True)
     _run(config)

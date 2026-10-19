@@ -22,10 +22,10 @@ changes.
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from .. import __version__
-
-from ..logging_utils import get_logger, init_logging
+from ..logging_utils import configure_stderr_logging, get_logger
 
 _log = get_logger("cli")
 
@@ -132,7 +132,7 @@ class TrainCommand(_ConfigCommand):
 
         if config.modality is Modality.SPEECH and self.name in ("grpo", "gspo") and nproc > 1:
             _log.warning("speech RL is single-GPU only; not launching under torchrun "
-                  "(pin distributed.nproc_per_node: 1 to silence this).")
+                         "(pin distributed.nproc_per_node: 1 to silence this).")
             return 1
         return nproc
 
@@ -171,13 +171,14 @@ class TrainCommand(_ConfigCommand):
     # -- training ----------------------------------------------------------------
 
     def _train(self, config) -> int:
+        """Build the trainer for ``config``, train, and save the model + processor."""
         from transformers import set_seed
 
-        from ..logging_utils import setup_logging, snapshot_config
+        from ..logging_utils import configure_experiment_trackers, snapshot_config
         from ..trainers import build_trainer
 
         set_seed(config.seed)
-        setup_logging(config)
+        configure_experiment_trackers(config)
 
         trainer = build_trainer(config)
         output_dir = trainer.args.output_dir
@@ -213,17 +214,6 @@ class _GenerationCommand(_ConfigCommand):
         )
 
     def run(self, args: argparse.Namespace, overrides: list[str], argv: list[str]) -> int:
-        return self._evaluate(
-            args.config, overrides, args.checkpoint, getattr(args, "output", None)
-        )
-
-    def _evaluate(
-        self,
-        config_path,
-        overrides: list[str],
-        checkpoint: str | None,
-        output: str | None,
-    ) -> int:
         """Load a checkpoint and score :attr:`split` by autoregressive decoding.
 
         Returns:
@@ -235,9 +225,9 @@ class _GenerationCommand(_ConfigCommand):
         from ..models.loader import load_model_and_processor
         from ..trainers.common import init_plugins
 
-        if checkpoint:
-            overrides = [*overrides, f"--model.model_name_or_id={checkpoint}"]
-        config = load_config(config_path, overrides, task="sft")
+        if args.checkpoint:
+            overrides = [*overrides, f"--model.model_name_or_id={args.checkpoint}"]
+        config = load_config(args.config, overrides, task="sft")
         config.eval.generate.enabled = True
         init_plugins(config)
         loaded = load_model_and_processor(config)
@@ -257,7 +247,9 @@ class _GenerationCommand(_ConfigCommand):
         evaluator = GenerationEvaluator(
             config, loaded.processor, records, cap_samples=(self.split == "eval")
         )
-        metrics = evaluator.evaluate(loaded.model, save_path=output, prefix=self.split)
+        metrics = evaluator.evaluate(
+            loaded.model, save_path=getattr(args, "output", None), prefix=self.split
+        )
         _log.info("%s metrics: %s", self.split, metrics)
         return 0
 
@@ -293,7 +285,7 @@ class DocsCommand(Command):
     _GITHUB_REPO = "https://github.com/nagohachi/glide"
     _GITHUB_SRC = f"{_GITHUB_REPO}/blob/main/src/glide/"
     # docs/templates is four levels above this file: src/glide/cli/main.py -> repo root
-    _TEMPLATE_DIR = str(__import__("pathlib").Path(__file__).parents[3] / "docs" / "templates")
+    _TEMPLATE_DIR = str(Path(__file__).parents[3] / "docs" / "templates")
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--output", "-o", default="docs/api", help="Output directory.")
@@ -361,16 +353,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the ``glide`` console script."""
-    init_logging()
+    configure_stderr_logging()
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = _build_parser()
     args, overrides = parser.parse_known_args(argv)
 
-    command = COMMANDS.get(args.command)
-    if command is None:
-        parser.error(f"Unknown command: {args.command}")
-        return 2
-    return command.run(args, overrides, argv)
+    # The subparsers are required and built from COMMANDS, so argparse has already
+    # rejected any name that is not a key here.
+    return COMMANDS[args.command].run(args, overrides, argv)
 
 
 if __name__ == "__main__":

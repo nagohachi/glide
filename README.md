@@ -177,9 +177,9 @@ from glide.registry import rewards
 
 @rewards.register("my_reward")
 def build_my_reward(scale: float = 1.0):
-    def _reward(prompts=None, completions=None, **columns):
+    def _compute_reward(prompts=None, completions=None, **columns):
         return [scale * len(c) for c in completions]
-    return _reward
+    return _compute_reward
 ```
 
 Registries: `rewards`, `metrics`, `audio_encoders`, `projectors`, `collators`.

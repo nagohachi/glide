@@ -129,7 +129,7 @@ plugin and name it in the config:
 from glide.registry import audio_encoders
 
 @audio_encoders.register("my_enc")
-def build(cfg, sample_rate): ...
+def build_my_encoder(cfg, sample_rate): ...
 ```
 
 ```yaml

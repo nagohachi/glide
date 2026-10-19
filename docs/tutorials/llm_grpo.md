@@ -59,13 +59,13 @@ Drop a plugin in your project `src/` and reference it:
 from glide.registry import rewards
 
 @rewards.register("digits_only")
-def build_digits_only():
+def build_digits_only_reward():
     import re
-    def _reward(prompts=None, completions=None, **cols):
-        from glide.plugins.rewards import completion_text
-        return [1.0 if re.fullmatch(r"\d+", completion_text(c).strip()) else 0.0
+    def _compute_reward(prompts=None, completions=None, **cols):
+        from glide.plugins.rewards import extract_completion_text
+        return [1.0 if re.fullmatch(r"\d+", extract_completion_text(c).strip()) else 0.0
                 for c in completions]
-    return _reward
+    return _compute_reward
 ```
 
 ```yaml

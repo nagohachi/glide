@@ -476,7 +476,7 @@ def build_speech_rl_trainer(config: GlideConfig) -> SpeechGSPOTrainer:
 
     tokenizer = loaded.tokenizer
     # train=False: no speed-perturb / specaugment during rollout.
-    collator = ComposedSpeechCollator.from_config(
+    collator = ComposedSpeechCollator.build_from_config(
         config, tokenizer, loaded.model.encoder, train=False
     )
 

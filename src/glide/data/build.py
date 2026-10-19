@@ -121,7 +121,7 @@ class _AudioLengthCache:
         self.key = key
 
     @classmethod
-    def from_config(cls, config: GlideConfig) -> "_AudioLengthCache":
+    def build_from_config(cls, config: GlideConfig) -> "_AudioLengthCache":
         manifests = _list_train_manifest_paths(config)
         parts: list[Any] = [config.data.audio_field, config.speech.sample_rate,
                             config.data.max_train_samples]
@@ -194,7 +194,7 @@ def compute_audio_lengths(dataset: JsonlDataset, config: GlideConfig) -> list[in
         return manifest
 
     n = len(dataset)
-    cache = _AudioLengthCache.from_config(config)
+    cache = _AudioLengthCache.build_from_config(config)
     cached = cache.read(n)
     if cached is not None:
         return cached

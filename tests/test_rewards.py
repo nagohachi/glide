@@ -5,16 +5,16 @@ from glide.plugins.rewards import (
     build_exact_match_reward,
     build_format_reward,
     build_length_reward,
-    completion_text,
+    extract_completion_text,
 )
 
 
 def test_completion_text_str_and_messages():
-    assert completion_text("hi") == "hi"
-    assert completion_text([{"role": "assistant", "content": "hello"}]) == "hello"
+    assert extract_completion_text("hi") == "hi"
+    assert extract_completion_text([{"role": "assistant", "content": "hello"}]) == "hello"
     # multimodal content blocks
     msg = [{"role": "assistant", "content": [{"type": "text", "text": "hey"}]}]
-    assert completion_text(msg) == "hey"
+    assert extract_completion_text(msg) == "hey"
 
 
 def test_format_reward_matches_think_block():

@@ -39,11 +39,11 @@ def test_build_metric_fn_bleu_not_normalized_and_single_call():
     original_bleu = metrics.get("bleu")
     seen = []
 
-    def _fake_bleu(preds, refs, *, normalize=False):
+    def _compute_fake_bleu(preds, refs, *, normalize=False):
         seen.append(normalize)
         return {"bleu": 0.0}
 
-    metrics.register("bleu", _fake_bleu, exist_ok=True)
+    metrics.register("bleu", _compute_fake_bleu, exist_ok=True)
     try:
         build_metric_fn(["bleu"], normalize=True)(["a"], ["a"])
     finally:

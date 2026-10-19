@@ -3,12 +3,12 @@
 from glide.config.schema import GlideConfig, Modality
 
 
-def test_builders_resolve_split_to_jsonl_path(jsonl_file):
+def test_builders_resolve_split_to_jsonl_path(write_jsonl_file):
     from glide.data.build import build_multimodal_dataset, build_sft_text_dataset
 
     cfg = GlideConfig()
     cfg.modality = Modality.TEXT
-    cfg.data.train_jsonl_path = jsonl_file(
+    cfg.data.train_jsonl_path = write_jsonl_file(
         [{"prompt": f"q{i}", "response": f"a{i}"} for i in range(4)]
     )
     cfg.data.max_train_samples = 3

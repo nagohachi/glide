@@ -231,15 +231,16 @@ class QwenOmniAudioTowerEncoder(_QwenAudioTowerEncoder):
         return self._pad_chunks(chunks, flat.device)
 
 
-def _force_flash_attention(tower) -> bool:
-    """Switch ``tower`` and its submodules to FA2 if flash-attn is installed.
-
-    Returns whether the tower now runs FA2 (i.e. whether the varlen path is usable).
-    """
+def _is_flash_attn_installed() -> bool:
     import importlib.util
 
-    if importlib.util.find_spec("flash_attn") is None:
-        return False
+    return importlib.util.find_spec("flash_attn") is not None
+
+
+def _force_flash_attention(tower) -> None:
+    """Switch ``tower`` and its submodules to FA2 (no-op without flash-attn)."""
+    if not _is_flash_attn_installed():
+        return
     for module in [tower, *tower.modules()]:
         sub_config = getattr(module, "config", None)
         if sub_config is not None:
@@ -249,7 +250,12 @@ def _force_flash_attention(tower) -> bool:
                 pass
         if hasattr(module, "_attn_implementation"):
             module._attn_implementation = "flash_attention_2"
-    return getattr(tower.config, "_attn_implementation", None) == "flash_attention_2"
+
+
+def _is_flash_attention_active(tower) -> bool:
+    """Whether ``tower`` runs FA2, i.e. whether its leak-free varlen path is usable."""
+    return (_is_flash_attn_installed()
+            and getattr(tower.config, "_attn_implementation", None) == "flash_attention_2")
 
 
 @audio_encoders.register("qwen3_asr_aut", exist_ok=True)
@@ -282,7 +288,8 @@ def build_qwen3_asr_audio_tower(cfg: AudioEncoderConfig, sample_rate: int = 1600
     # flash_attention_2; under sdpa/eager a concatenated call leaks across utterances. So
     # force FA2 on the tower -> enables the fast leak-free *varlen* path (one call for the
     # whole batch). If FA2 isn't available, fall back to the per-audio loop (leak-free too).
-    use_varlen = _force_flash_attention(tower)
+    _force_flash_attention(tower)
+    use_varlen = _is_flash_attention_active(tower)
     _log.info(
         "qwen3_asr_aut: %s",
         "FA2 varlen (batched, leak-free)" if use_varlen else "per-audio loop (sdpa fallback)",

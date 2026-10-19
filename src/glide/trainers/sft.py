@@ -31,7 +31,7 @@ def _build_collator(config: GlideConfig, loaded):
     if config.is_composed_speech_llm():
         from ..data.composed_collator import ComposedSpeechCollator
 
-        return ComposedSpeechCollator.from_config(
+        return ComposedSpeechCollator.build_from_config(
             config, loaded.tokenizer, loaded.model.encoder, train=True
         )
     if config.template.collator:

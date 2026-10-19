@@ -33,7 +33,7 @@ __all__ = ["ComposedSpeechCollator"]
 class ComposedSpeechCollator:
     """Collate raw speech records for a composed Speech-LLM (see the module docstring).
 
-    Use :meth:`from_config` rather than the field-by-field constructor: it wires the
+    Use :meth:`build_from_config` rather than the field-by-field constructor: it wires the
     tokenizer, the encoder's feature extractor and the augmentation settings the same
     way for training, validation decoding and RL rollout.
     """
@@ -58,7 +58,7 @@ class ComposedSpeechCollator:
             )
 
     @classmethod
-    def from_config(
+    def build_from_config(
         cls, config: GlideConfig, tokenizer, encoder, *, train: bool
     ) -> "ComposedSpeechCollator":
         """Build the collator for ``config`` around a composed model's ``encoder``.

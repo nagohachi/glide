@@ -157,7 +157,7 @@ class GenerationEvaluator:
         if self._composed and self._composed_collator is None:
             from ..data.composed_collator import ComposedSpeechCollator
 
-            self._composed_collator = ComposedSpeechCollator.from_config(
+            self._composed_collator = ComposedSpeechCollator.build_from_config(
                 self.config, self.tokenizer, gen_model.encoder, train=False
             )
 
