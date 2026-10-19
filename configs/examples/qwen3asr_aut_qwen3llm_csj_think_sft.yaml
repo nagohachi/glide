@@ -5,7 +5,7 @@
 # projector already maps the AuT output to Qwen3's 2048-d hidden space, so it slots in.
 # Requires the transformers==4.57.6 env (.venv-qwenasr; provides qwen_asr + Qwen3-ASR):
 #   UV_PROJECT_ENVIRONMENT=.venv-qwenasr uv run --no-sync glide sft \
-#       configs/examples/qwen3asr_aut_qwen3llm_think_sft.yaml
+#       configs/examples/qwen3asr_aut_qwen3llm_csj_think_sft.yaml
 extends: [../data_root.yaml, ../base.yaml]
 
 task: sft

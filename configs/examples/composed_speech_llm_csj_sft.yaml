@@ -1,5 +1,5 @@
-# Composed Speech-LLM SFT: pick an encoder + projector + text LLM independently.
-#   glide sft configs/examples/composed_speech_llm_sft.yaml
+# Composed Speech-LLM SFT on CSJ: pick an encoder + projector + text LLM independently.
+#   glide sft configs/examples/composed_speech_llm_csj_sft.yaml
 # data_root.yaml (gitignored; copy from data_root.example.yaml) maps root_key -> absolute root.
 extends: [../data_root.yaml, ../base.yaml]
 
