@@ -22,9 +22,8 @@ from transformers import TrainerCallback
 from ..config.schema import GlideConfig, Modality
 from ..data.collator import load_media
 from ..data.template import build_prompt_messages, extract_reference
-from ..metrics.text_metrics import build_metric_fn
-
 from ..logging_utils import get_logger
+from ..metrics.text_metrics import build_metric_fn
 
 _log = get_logger("eval")
 
@@ -102,15 +101,15 @@ class GenerationEvaluator:
             return {k: (v.to(device) if hasattr(v, "to") else v) for k, v in inputs.items()}
         modality = self.config.modality
         # Only pass enable_thinking when configured (matches ComposedSpeechCollator).
-        ct_kwargs: dict = {}
+        chat_template_kwargs: dict = {}
         if self.config.template.enable_thinking is not None:
-            ct_kwargs["enable_thinking"] = self.config.template.enable_thinking
+            chat_template_kwargs["enable_thinking"] = self.config.template.enable_thinking
         texts, media = [], []
         for rec in batch_records:
             msgs = build_prompt_messages(rec, self.config.data, self.config.template, modality)
             texts.append(
                 self.processor.apply_chat_template(
-                    msgs, tokenize=False, add_generation_prompt=True, **ct_kwargs
+                    msgs, tokenize=False, add_generation_prompt=True, **chat_template_kwargs
                 )
             )
             item = load_media(rec, self.config.data, modality, self.config.speech.sample_rate)
@@ -135,10 +134,16 @@ class GenerationEvaluator:
         return {k: (v.to(device) if hasattr(v, "to") else v) for k, v in inputs.items()}
 
     @staticmethod
-    def _references(records, data_cfg):
+    def _extract_references(records, data_cfg) -> list[str]:
         return [extract_reference(r, data_cfg) or "" for r in records]
 
-    def evaluate(self, model, save_path: str | Path | None = None, step: int | None = None, prefix: str = "eval") -> dict[str, float]:
+    def evaluate(
+        self,
+        model,
+        save_path: str | Path | None = None,
+        step: int | None = None,
+        prefix: str = "eval",
+    ) -> dict[str, float]:
         """Run generation over all eval records and return the metric dict.
 
         If *save_path* is given the per-sample predictions are written there as
@@ -177,7 +182,7 @@ class GenerationEvaluator:
         if model_was_training:
             gen_model.train()
 
-        references = self._references(self.records, self.config.data)
+        references = self._extract_references(self.records, self.config.data)
         if self.answer_after is not None or self.answer_regex is not None:
             predictions = [self._extract_answer(p) for p in predictions]
             references = [self._extract_answer(r) for r in references]
@@ -196,51 +201,58 @@ class GenerationEvaluator:
         return {f"{prefix}_{k}": v for k, v in result.items()}
 
 
-class GenerateEvalCallback(TrainerCallback):
-    """Trainer callback that runs :class:`GenerationEvaluator` on each evaluation."""
+class _GenerationEvalCallback(TrainerCallback):
+    """Run a :class:`GenerationEvaluator` from a trainer hook and log its metrics.
+
+    Metrics go through the bound trainer (:meth:`bind_trainer`), which also records
+    them in ``state.log_history``; without one they are appended there directly.
+    """
+
+    #: Metric-key prefix and the predictions file written under ``output_dir``.
+    prefix: str = "eval"
 
     def __init__(self, evaluator: GenerationEvaluator):
         self.evaluator = evaluator
-        #: Set by the trainer builder so metrics can be logged through it.
-        self._trainer: Any = None
+        self.trainer: Any = None
 
-    def on_evaluate(self, args, state, control, model=None, **kwargs):
+    def bind_trainer(self, trainer) -> None:
+        """Log metrics through ``trainer`` (call once the trainer is constructed)."""
+        self.trainer = trainer
+
+    def _evaluate_and_log(self, args, state, model) -> None:
         if model is None:
             return
         # Write JSONL only from global rank 0; local_rank would fire once per node.
         save_path = None
         if state.is_world_process_zero:
-            save_path = os.path.join(args.output_dir, "eval_predictions.jsonl")
-        metrics = self.evaluator.evaluate(model, save_path=save_path, step=state.global_step)
-        if metrics:
-            # Trainer.log() already appends to state.log_history; only append manually on
-            # the no-trainer path, else every metric lands in trainer_state.json twice.
-            if getattr(self, "_trainer", None) is not None:
-                self._trainer.log(metrics)
-            else:
-                state.log_history.append({**metrics, "step": state.global_step})
-                _log.info(f"generate-eval: step {state.global_step}: {metrics}")
+            save_path = os.path.join(args.output_dir, f"{self.prefix}_predictions.jsonl")
+        metrics = self.evaluator.evaluate(
+            model, save_path=save_path, step=state.global_step, prefix=self.prefix
+        )
+        if not metrics:
+            return
+        # Trainer.log() already appends to state.log_history; only append manually on
+        # the no-trainer path, else every metric lands in trainer_state.json twice.
+        if self.trainer is not None:
+            self.trainer.log(metrics)
+        else:
+            state.log_history.append({**metrics, "step": state.global_step})
+            _log.info(f"{self.prefix}-generation: step {state.global_step}: {metrics}")
 
 
-class TestEvalCallback(TrainerCallback):
-    """Trainer callback that runs :class:`GenerationEvaluator` on test data at end of training."""
+class GenerateEvalCallback(_GenerationEvalCallback):
+    """Score the validation records by AR decoding at every evaluation."""
 
-    def __init__(self, evaluator: GenerationEvaluator):
-        self.evaluator = evaluator
-        self._trainer: Any = None
+    prefix = "eval"
+
+    def on_evaluate(self, args, state, control, model=None, **kwargs):
+        self._evaluate_and_log(args, state, model)
+
+
+class TestEvalCallback(_GenerationEvalCallback):
+    """Score the held-out test records by AR decoding once, at the end of training."""
+
+    prefix = "test"
 
     def on_train_end(self, args, state, control, model=None, **kwargs):
-        if model is None:
-            return
-        save_path = None
-        if state.is_world_process_zero:
-            save_path = os.path.join(args.output_dir, "test_predictions.jsonl")
-        metrics = self.evaluator.evaluate(
-            model, save_path=save_path, step=state.global_step, prefix="test"
-        )
-        if metrics:
-            if getattr(self, "_trainer", None) is not None:
-                self._trainer.log(metrics)
-            else:
-                state.log_history.append({**metrics, "step": state.global_step})
-                _log.info(f"test-eval: step {state.global_step}: {metrics}")
+        self._evaluate_and_log(args, state, model)

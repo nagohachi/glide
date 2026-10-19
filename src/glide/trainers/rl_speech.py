@@ -36,8 +36,8 @@ import torch
 import torch.nn.functional as F
 import transformers
 
-from ..config.schema import GlideConfig, Task
 from ..config.loader import build_training_args
+from ..config.schema import GlideConfig, Task
 from ..data.build import build_multimodal_dataset
 from ..data.composed_collator import ComposedSpeechCollator
 from ..models.loader import load_model_and_processor
@@ -50,7 +50,7 @@ __all__ = ["build_speech_rl_trainer", "SpeechGSPOTrainer"]
 # Rollout backends
 # --------------------------------------------------------------------------- #
 @dataclass
-class _RolloutCtx:
+class _RolloutContext:
     """Shared handles a backend needs to roll out (set by the trainer)."""
 
     collator: ComposedSpeechCollator
@@ -78,7 +78,8 @@ class RolloutBackend:
     step (on-policy); the trainer then uses ``new_logp.detach()`` (ratio == 1).
     """
 
-    def bind(self, ctx: _RolloutCtx) -> None:
+    def bind(self, ctx: _RolloutContext) -> None:
+        """Attach the collator/tokenizer/sampling settings the trainer resolved."""
         self.ctx = ctx
 
     def rollout(self, model, records: list[dict]) -> list[dict]:
@@ -86,6 +87,19 @@ class RolloutBackend:
 
     def sync_weights(self, model) -> None:
         """Push updated policy weights to the rollout engine (no-op if in-process)."""
+
+    def _build_prompt_inputs(self, record: dict, device) -> tuple[dict, torch.Tensor, dict]:
+        """Build ``record``'s generation inputs: ``(inputs, prompt_ids, audio_inputs)``.
+
+        ``inputs`` (on ``device``) feed ``generate``; ``prompt_ids`` (CPU) and the
+        detached ``audio_inputs`` are what the trainer's grad forward re-uses.
+        """
+        inputs = self.ctx.collator.build_generation_inputs([record])
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        prompt_ids = inputs["input_ids"][0].detach().to("cpu")
+        audio = {k: v.detach() for k, v in inputs.items()
+                 if k not in ("input_ids", "attention_mask")}
+        return inputs, prompt_ids, audio
 
 
 class LocalRolloutBackend(RolloutBackend):
@@ -102,13 +116,9 @@ class LocalRolloutBackend(RolloutBackend):
         device = next(model.parameters()).device
         out: list[dict] = []
         for rec in records:
-            gi = ctx.collator.build_generation_inputs([rec])
-            gi = {k: v.to(device) for k, v in gi.items()}
-            prompt_ids = gi["input_ids"][0].detach().to("cpu")
-            audio = {k: v for k, v in gi.items()
-                     if k not in ("input_ids", "attention_mask")}
+            inputs, prompt_ids, audio = self._build_prompt_inputs(rec, device)
             gen = model.generate(
-                **gi,
+                **inputs,
                 do_sample=True,
                 temperature=ctx.temperature,
                 top_p=ctx.top_p,
@@ -122,21 +132,19 @@ class LocalRolloutBackend(RolloutBackend):
                                        ctx.pad_token_id)
                 text = ctx.tokenizer.decode(ids, skip_special_tokens=True)
                 comps.append({"ids": ids, "text": text, "old_logp": None})
-            out.append({"prompt_ids": prompt_ids,
-                        "audio": {k: v.detach() for k, v in audio.items()},
-                        "comps": comps})
+            out.append({"prompt_ids": prompt_ids, "audio": audio, "comps": comps})
         return out
 
 
 # Rename map: training-side composed SpeechLLM param names -> the vLLM AuT server's
 # ``thinker.*`` names (the server's load_weights routes those through its mapper).
-_GLIDE_TO_THINKER = (
+_THINKER_PREFIX_MAP = (
     ("encoder.model.", "thinker.audio_tower."),
     ("llm.model.", "thinker.model."),
 )
 
 
-def _glide_to_thinker(name: str, *, tie_word_embeddings: bool = True) -> str | None:
+def _map_param_name_to_thinker(name: str, *, tie_word_embeddings: bool = True) -> str | None:
     """Map a composed-SpeechLLM param name to its rollout-server name (or ``None``).
 
     The projector and lm_head must NOT be silently dropped: a trainable projector
@@ -148,7 +156,7 @@ def _glide_to_thinker(name: str, *, tie_word_embeddings: bool = True) -> str | N
         if tie_word_embeddings:
             return None
         return "thinker.lm_head." + name[len("llm.lm_head."):]
-    for old, new in _GLIDE_TO_THINKER:
+    for old, new in _THINKER_PREFIX_MAP:
         if name.startswith(old):
             return new + name[len(old):]
     if name.startswith("projector."):
@@ -170,7 +178,7 @@ class VLLMRolloutBackend(RolloutBackend):
         self.base_url = f"http://{host}:{port}"
         self.sync_path = sync_path
 
-    def _post(self, route: str, payload: dict, timeout: float = 600.0) -> dict:
+    def _post_json(self, route: str, payload: dict, timeout: float = 600.0) -> dict:
         import requests
 
         # Bypass any cluster http(s)_proxy (Squid) -- the rollout server is internal;
@@ -190,7 +198,7 @@ class VLLMRolloutBackend(RolloutBackend):
         # these into prompt_ids for the grad forward, so the rollout server must condition
         # on the SAME context or completions/old_logps come from a different distribution
         # (silently wrong importance ratios and rewards).
-        resp = self._post("/rollout", {
+        resp = self._post_json("/rollout", {
             "audio_paths": [rec[audio_field] for rec in records],
             "prompts": [rec.get(prompt_field, "") for rec in records],
             "system_prompt": ctx.collator.template.system_prompt,
@@ -202,11 +210,7 @@ class VLLMRolloutBackend(RolloutBackend):
         rollouts = resp["rollouts"]
         out: list[dict] = []
         for rec, comps_raw in zip(records, rollouts):
-            gi = ctx.collator.build_generation_inputs([rec])
-            gi = {k: v.to(device) for k, v in gi.items()}
-            prompt_ids = gi["input_ids"][0].detach().to("cpu")
-            audio = {k: v.detach() for k, v in gi.items()
-                     if k not in ("input_ids", "attention_mask")}
+            _, prompt_ids, audio = self._build_prompt_inputs(rec, device)
             comps = []
             for c in comps_raw:
                 comps.append({
@@ -225,12 +229,12 @@ class VLLMRolloutBackend(RolloutBackend):
         tie = bool(getattr(model.config, "tie_word_embeddings", True))
         sd = {}
         for name, p in model.named_parameters():
-            nk = _glide_to_thinker(name, tie_word_embeddings=tie)
+            nk = _map_param_name_to_thinker(name, tie_word_embeddings=tie)
             if nk is not None:
                 sd[nk] = p.detach().to(torch.bfloat16).cpu().contiguous()
         os.makedirs(os.path.dirname(self.sync_path) or ".", exist_ok=True)
         save_file(sd, self.sync_path)
-        self._post("/reload", {"path": self.sync_path})
+        self._post_json("/reload", {"path": self.sync_path})
 
 
 def _truncate_at_eos(ids: torch.Tensor, eos_id: int | None, pad_id: int) -> torch.Tensor:
@@ -287,12 +291,9 @@ class SpeechGSPOTrainer(transformers.Trainer):
     def _prepare_inputs(self, inputs):
         return inputs
 
-    def get_train_dataloader(self):
-        # Default collator would torch-collate dicts; we want the raw record list.
-        return super().get_train_dataloader()
-
     # ---- reward / advantage ------------------------------------------------ #
-    def _group_rewards(self, completions_text: list[str], reference) -> list[float]:
+    def _compute_group_rewards(self, completions_text: list[str], reference) -> list[float]:
+        """Weighted sum of every reward function for one record's group of completions."""
         ref_field = self.gconf.data.reference_field
         n = len(completions_text)
         cols = {ref_field: [reference] * n}
@@ -305,7 +306,8 @@ class SpeechGSPOTrainer(transformers.Trainer):
         return total
 
     @staticmethod
-    def _advantages(rewards: list[float], scale: bool) -> torch.Tensor:
+    def _compute_advantages(rewards: list[float], scale: bool) -> torch.Tensor:
+        """Group-normalised advantages ``r - mean`` (divided by the std when ``scale``)."""
         r = torch.tensor(rewards, dtype=torch.float32)
         adv = r - r.mean()
         if scale and r.numel() > 1:
@@ -313,8 +315,8 @@ class SpeechGSPOTrainer(transformers.Trainer):
         return adv
 
     # ---- per-record policy logps ------------------------------------------ #
-    def _completion_logps(self, model, prompt_ids: torch.Tensor, comps: list[dict],
-                          audio: dict):
+    def _compute_completion_logps(self, model, prompt_ids: torch.Tensor, comps: list[dict],
+                                  audio: dict):
         """Return per-completion token log-probs ``list[Tensor(Lc)]`` (grad-enabled).
 
         Generates the grad forward for one record's whole group at once (shared audio
@@ -363,8 +365,16 @@ class SpeechGSPOTrainer(transformers.Trainer):
             per.append(pred.gather(-1, tok.unsqueeze(-1)).squeeze(-1))
         return per
 
+    @staticmethod
+    def _compute_clipped_surrogate(ratio: torch.Tensor, advantage: torch.Tensor, eps: float):
+        """PPO-style clipped objective: ``(loss, clip_fraction)`` averaged over ``ratio``."""
+        unclipped = ratio * advantage
+        clipped = torch.clamp(ratio, 1 - eps, 1 + eps) * advantage
+        return -torch.min(unclipped, clipped).mean(), float((unclipped > clipped).float().mean())
+
     # ---- GSPO/GRPO loss for one batch of records --------------------------- #
-    def _gspo_loss(self, model, records: list[dict]):
+    def _compute_policy_loss(self, model, records: list[dict]):
+        """Roll out ``records``, score the group, and return the GSPO/GRPO loss."""
         # Single-GPU v1: the policy is unwrapped, so the custom forward method is
         # reachable and grads still flow. (Multi-GPU DDP would need a forward shim.)
         policy = self.accelerator.unwrap_model(model)
@@ -373,7 +383,7 @@ class SpeechGSPOTrainer(transformers.Trainer):
         eps = rl.clip_eps
 
         losses = []
-        rew_means, rew_stds, comp_lens, clipfracs, kls = [], [], [], [], []
+        rew_means, rew_stds, comp_lens, clipfracs = [], [], [], []
         for rec, item in zip(records, roll):
             comps = item["comps"]
             ref = rec.get(self.gconf.data.reference_field)
@@ -384,35 +394,27 @@ class SpeechGSPOTrainer(transformers.Trainer):
                     "field holding the target text). Without it the CER reward returns 0 for "
                     "every completion, so all advantages are 0 and training silently no-ops."
                 )
-            rewards = self._group_rewards([c["text"] for c in comps], ref)
-            adv = self._advantages(rewards, rl.scale_rewards).to(
+            rewards = self._compute_group_rewards([c["text"] for c in comps], ref)
+            adv = self._compute_advantages(rewards, rl.scale_rewards).to(
                 next(model.parameters()).device
             )
 
-            new_tok = self._completion_logps(model, item["prompt_ids"], comps, item["audio"])
+            new_tok = self._compute_completion_logps(
+                model, item["prompt_ids"], comps, item["audio"]
+            )
             for i, c in enumerate(comps):
                 lc = new_tok[i].numel()
                 if lc == 0:
                     continue
-                new_seq = new_tok[i].sum()
-                old_seq = (c["old_logp"].to(new_seq.device).sum()
-                           if c["old_logp"] is not None else new_seq.detach())
-                if self._sequence_level:                       # GSPO: length-normalised
-                    ratio = torch.exp((new_seq - old_seq) / lc)
-                    a = adv[i]
-                    unclipped = ratio * a
-                    clipped = torch.clamp(ratio, 1 - eps, 1 + eps) * a
-                    losses.append(-torch.min(unclipped, clipped))
-                    clipfracs.append(float((unclipped > clipped).float()))
-                else:                                          # GRPO: per-token ratio
-                    old_tok = (c["old_logp"].to(new_tok[i].device)
-                               if c["old_logp"] is not None else new_tok[i].detach())
+                old_tok = (c["old_logp"].to(new_tok[i].device)
+                           if c["old_logp"] is not None else new_tok[i].detach())
+                if self._sequence_level:   # GSPO: one length-normalised sequence ratio
+                    ratio = torch.exp((new_tok[i].sum() - old_tok.sum()) / lc)
+                else:                      # GRPO: per-token ratio
                     ratio = torch.exp(new_tok[i] - old_tok)
-                    a = adv[i]
-                    unclipped = ratio * a
-                    clipped = torch.clamp(ratio, 1 - eps, 1 + eps) * a
-                    losses.append(-torch.min(unclipped, clipped).mean())
-                    clipfracs.append(float((unclipped > clipped).float().mean()))
+                loss, clipfrac = self._compute_clipped_surrogate(ratio, adv[i], eps)
+                losses.append(loss)
+                clipfracs.append(clipfrac)
                 comp_lens.append(lc)
             rew_means.append(sum(rewards) / len(rewards))
             rew_stds.append(float(torch.tensor(rewards).std(unbiased=False)))
@@ -420,16 +422,16 @@ class SpeechGSPOTrainer(transformers.Trainer):
         loss = (torch.stack(losses).mean() if losses
                 else next(model.parameters()).sum() * 0.0)
         self._extra_logs = {
-            "reward_mean": _mean(rew_means),
-            "reward_std": _mean(rew_stds),
-            "completion_len": _mean(comp_lens),
-            "clip_frac": _mean(clipfracs),
+            "reward_mean": _compute_mean(rew_means),
+            "reward_std": _compute_mean(rew_stds),
+            "completion_len": _compute_mean(comp_lens),
+            "clip_frac": _compute_mean(clipfracs),
         }
         return loss
 
     def training_step(self, model, inputs, num_items_in_batch=None):
         model.train()
-        loss = self._gspo_loss(model, inputs)
+        loss = self._compute_policy_loss(model, inputs)
         if self.args.n_gpu > 1:
             loss = loss.mean()
         if self.args.gradient_accumulation_steps > 1:
@@ -446,7 +448,7 @@ class SpeechGSPOTrainer(transformers.Trainer):
             super().log(logs)
 
 
-def _mean(xs) -> float:
+def _compute_mean(xs) -> float:
     return float(sum(xs) / len(xs)) if xs else 0.0
 
 
@@ -459,7 +461,7 @@ def build_speech_rl_trainer(config: GlideConfig) -> SpeechGSPOTrainer:
     if config.peft.enabled:
         # rl.py wires peft only for the text GRPO path; the composed speech loop would
         # otherwise silently full-fine-tune. LoRA here would also break weight-sync
-        # (_glide_to_thinker maps base names, not adapter names), so fail loudly.
+        # (_map_param_name_to_thinker maps base names, not adapter names), so fail loudly.
         raise NotImplementedError(
             "peft.enabled is not supported by the speech GSPO/GRPO loop (rl_speech): "
             "LoRA adapter param names would not map through the vLLM weight-sync. Run "
@@ -481,7 +483,7 @@ def build_speech_rl_trainer(config: GlideConfig) -> SpeechGSPOTrainer:
     pad_id = tokenizer.pad_token_id
     if pad_id is None:
         pad_id = tokenizer.eos_token_id
-    ctx = _RolloutCtx(
+    ctx = _RolloutContext(
         collator=collator,
         tokenizer=tokenizer,
         num_generations=config.rl.num_generations,

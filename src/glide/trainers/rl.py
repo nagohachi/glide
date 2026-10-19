@@ -13,17 +13,17 @@ Reward functions and their weights come from the config (see
   through a vLLM server on a separate GPU. Vision RL is still gated with an error.
 """
 
-from ..config.schema import GlideConfig, Modality, Task
 from ..config.loader import build_training_args
+from ..config.schema import GlideConfig, Modality, Task
 from ..data.build import build_rl_text_dataset
 from ..models.loader import load_model_and_processor
-from .common import build_reward_funcs, init_plugins
-from .sft import _peft_config
+from .common import build_peft_config, build_reward_funcs, init_plugins
 
 __all__ = ["build_rl_trainer"]
 
 
 def _check_modality(config: GlideConfig) -> None:
+    """Raise for modalities RL does not support yet (vision)."""
     if config.modality is Modality.VISION:
         raise NotImplementedError(
             f"RL ({config.task.value}) does not support the vision modality yet. "
@@ -50,7 +50,8 @@ def build_rl_trainer(config: GlideConfig):
     return _build_grpo_trainer(config, loaded, reward_funcs, reward_weights)
 
 
-def _common_rl_training_defaults(config: GlideConfig) -> None:
+def _apply_rl_training_defaults(config: GlideConfig) -> None:
+    """Populate GRPO/GSPO ``training`` defaults derived from ``config.rl``."""
     t = config.training
     if config.rl.use_vllm:
         t.setdefault("use_vllm", True)
@@ -60,7 +61,7 @@ def _common_rl_training_defaults(config: GlideConfig) -> None:
 def _build_grpo_trainer(config, loaded, reward_funcs, reward_weights):
     from trl import GRPOConfig, GRPOTrainer
 
-    _common_rl_training_defaults(config)
+    _apply_rl_training_defaults(config)
     t = config.training
     if reward_weights:
         t.setdefault("reward_weights", reward_weights)
@@ -76,5 +77,5 @@ def _build_grpo_trainer(config, loaded, reward_funcs, reward_weights):
         train_dataset=build_rl_text_dataset(config, "train"),
         eval_dataset=build_rl_text_dataset(config, "eval"),
         processing_class=loaded.tokenizer,
-        peft_config=_peft_config(config),
+        peft_config=build_peft_config(config),
     )
