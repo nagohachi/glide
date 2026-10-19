@@ -36,11 +36,6 @@ plug in exactly like the built-ins.
 | `rewards` | `rl.rewards[].name` | builder returning a TRL reward function |
 | `metrics` | `eval.metrics[]` | the metric function itself |
 | `collators` | `template.collator` | builder returning a collator |
-| `models` | — | *declared, currently unused* |
-| `templates` | — | *declared, currently unused* |
-
-> `models` and `templates` exist for symmetry but nothing resolves them yet, so
-> registering into them has no effect today.
 
 Each is a `Registry[Callable]` with a tiny API:
 
@@ -48,7 +43,7 @@ Each is a `Registry[Callable]` with a tiny API:
 reg.register(name, obj=None, *, exist_ok=False)  # decorator or direct call
 reg.get(name)                                    # -> value, KeyError if absent
 name in reg                                      # membership
-reg.names()                                      # -> sorted list[str]
+reg.list_names()                                 # -> sorted list[str]
 ```
 
 `register` raises `KeyError` on a duplicate name unless you pass
@@ -190,7 +185,7 @@ plugins:
 
 ```python
 from glide.registry import rewards
-rewards.names()          # ['cer', 'exact_match', 'format', 'length']
+rewards.list_names()     # ['cer', 'exact_match', 'format', 'length']
 "my_reward" in rewards   # False until the plugin module is imported
 ```
 

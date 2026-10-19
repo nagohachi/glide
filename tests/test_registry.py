@@ -10,12 +10,12 @@ def test_register_and_get():
     reg.register("a", 1)
 
     @reg.register("b")
-    def b():
+    def return_two():
         return 2
 
     assert reg.get("a") == 1
-    assert reg.get("b") is b
-    assert set(reg.names()) == {"a", "b"}
+    assert reg.get("b") is return_two
+    assert reg.list_names() == ["a", "b"]
     assert "a" in reg
 
 

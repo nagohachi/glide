@@ -1,7 +1,7 @@
 """Lightweight registries and plugin discovery.
 
-Every extensible component type (models, audio encoders, projectors, reward
-functions, metrics, templates, data collators) has its own :class:`Registry`.
+Every extensible component type (audio encoders, projectors, reward functions,
+metrics, data collators) has its own :class:`Registry`.
 Built-ins register themselves at import time; user plugins register themselves
 when their module is imported via :func:`load_plugins`.
 
@@ -37,12 +37,10 @@ T = TypeVar("T")
 __all__ = [
     "Registry",
     "load_plugins",
-    "models",
     "audio_encoders",
     "projectors",
     "rewards",
     "metrics",
-    "templates",
     "collators",
 ]
 
@@ -67,7 +65,7 @@ class Registry(Generic[T]):
             otherwise ``obj`` itself so the direct call is also chainable.
         """
 
-        def _do(value: T) -> T:
+        def _store_value(value: T) -> T:
             if name in self._store and not exist_ok:
                 raise KeyError(
                     f"{self.kind!r} already has an entry named {name!r}. "
@@ -76,9 +74,10 @@ class Registry(Generic[T]):
             self._store[name] = value
             return value
 
-        return _do if obj is None else _do(obj)
+        return _store_value if obj is None else _store_value(obj)
 
     def get(self, name: str) -> T:
+        """Return the entry registered under ``name`` (``KeyError`` listing all names)."""
         if name not in self._store:
             raise KeyError(
                 f"No {self.kind} named {name!r}. Registered: {sorted(self._store)}"
@@ -91,17 +90,16 @@ class Registry(Generic[T]):
     def __iter__(self) -> Iterator[str]:
         return iter(self._store)
 
-    def names(self) -> list[str]:
+    def list_names(self) -> list[str]:
+        """Return every registered name, sorted."""
         return sorted(self._store)
 
 
 # Concrete registries shared across the package.
-models: Registry[Callable] = Registry("model builder")
 audio_encoders: Registry[Callable] = Registry("audio encoder")
 projectors: Registry[Callable] = Registry("projector")
 rewards: Registry[Callable] = Registry("reward function")
 metrics: Registry[Callable] = Registry("metric")
-templates: Registry[Callable] = Registry("template")
 collators: Registry[Callable] = Registry("data collator")
 
 

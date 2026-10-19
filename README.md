@@ -182,9 +182,8 @@ def build_my_reward(scale: float = 1.0):
     return _reward
 ```
 
-Registries: `rewards`, `metrics`, `audio_encoders`, `projectors`, `templates`,
-`collators`, `models`. Subclass `glide.models.AudioEncoder` / `Projector` for
-custom multimodal components.
+Registries: `rewards`, `metrics`, `audio_encoders`, `projectors`, `collators`.
+Subclass `glide.models.AudioEncoder` / `Projector` for custom multimodal components.
 
 ---
 
