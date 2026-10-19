@@ -6,7 +6,7 @@ task: sft
 modality: vision
 
 model:
-  name: Qwen/Qwen2.5-VL-3B-Instruct   # any HF image-text-to-text model works
+  model_name_or_id: Qwen/Qwen2.5-VL-3B-Instruct   # any HF image-text-to-text model works
   auto_class: AutoModelForImageTextToText
   attn_implementation: sdpa
 
@@ -16,8 +16,8 @@ special_tokens:
 
 data:
   # {"image": "/path/img.jpg", "prompt": "Describe.", "response": "...", "reference": "..."}
-  train: data/vision_train.jsonl
-  eval: data/vision_eval.jsonl
+  train_jsonl_path: data/vision_train.jsonl
+  eval_jsonl_path: data/vision_eval.jsonl
   image_field: image
   reference_field: reference
 

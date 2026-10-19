@@ -23,11 +23,11 @@ task: grpo
 modality: text                      # text policy over ASR hypotheses
 
 model:
-  name: Qwen/Qwen3-1.7B
+  model_name_or_id: Qwen/Qwen3-1.7B
 
 data:
-  train: data/correction_train.jsonl
-  eval: data/correction_eval.jsonl
+  train_jsonl_path: data/correction_train.jsonl
+  eval_jsonl_path: data/correction_eval.jsonl
   reference_field: reference
 
 rl:

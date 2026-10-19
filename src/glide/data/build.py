@@ -27,10 +27,9 @@ __all__ = ["build_sft_text_dataset", "build_rl_text_dataset", "build_multimodal_
 
 def build_sft_text_dataset(config: GlideConfig, split: str):
     """Build a conversational prompt/completion ``Dataset`` for text SFT."""
-    path = getattr(config.data, split)
+    path, max_n = _get_split_source(config, split)
     if path is None:
         return None
-    max_n = config.data.max_train_samples if split == "train" else config.data.max_eval_samples
     ds = load_hf_dataset(path, max_samples=max_n)
 
     data, template = config.data, config.template
@@ -47,10 +46,9 @@ def build_sft_text_dataset(config: GlideConfig, split: str):
 
 def build_rl_text_dataset(config: GlideConfig, split: str):
     """Build a ``{"prompt", ...extra columns...}`` ``Dataset`` for RL training."""
-    path = getattr(config.data, split)
+    path, max_n = _get_split_source(config, split)
     if path is None:
         return None
-    max_n = config.data.max_train_samples if split == "train" else config.data.max_eval_samples
     ds = load_hf_dataset(path, max_samples=max_n)
 
     data, template = config.data, config.template
@@ -64,11 +62,19 @@ def build_rl_text_dataset(config: GlideConfig, split: str):
 
 def build_multimodal_dataset(config: GlideConfig, split: str):
     """Build a raw-record ``JsonlDataset`` for the speech/vision SFT path."""
-    path = getattr(config.data, split)
+    path, max_n = _get_split_source(config, split)
     if path is None:
         return None
-    max_n = config.data.max_train_samples if split == "train" else config.data.max_eval_samples
     return JsonlDataset(path, lazy=config.data.lazy, max_samples=max_n)
+
+
+def _get_split_source(
+    config: GlideConfig, split: str
+) -> tuple[str | list[str] | None, int | None]:
+    """Return ``(data.{split}_jsonl_path, sample cap)`` for ``split`` (``train``/``eval``)."""
+    path = getattr(config.data, f"{split}_jsonl_path")
+    max_n = config.data.max_train_samples if split == "train" else config.data.max_eval_samples
+    return path, max_n
 
 
 def _lengths_from_manifest(dataset: JsonlDataset, config: GlideConfig) -> list[int] | None:
@@ -94,8 +100,9 @@ def _lengths_from_manifest(dataset: JsonlDataset, config: GlideConfig) -> list[i
     return lengths
 
 
-def _manifest_paths(config: GlideConfig) -> list[str]:
-    p = config.data.train
+def _list_train_manifest_paths(config: GlideConfig) -> list[str]:
+    """Return ``data.train_jsonl_path`` as a list of strings (empty when unset)."""
+    p = config.data.train_jsonl_path
     if p is None:
         return []
     return [str(x) for x in (p if isinstance(p, list) else [p])]
@@ -105,7 +112,7 @@ def _lengths_cache_key(config: GlideConfig) -> str:
     """Fingerprint the manifests + relevant config so a stale cache is never reused."""
     parts: list[Any] = [config.data.audio_field, config.speech.sample_rate,
                         config.data.max_train_samples]
-    for path in _manifest_paths(config):
+    for path in _list_train_manifest_paths(config):
         try:
             st = os.stat(path)
             parts.append((path, int(st.st_mtime), int(st.st_size)))
@@ -115,7 +122,7 @@ def _lengths_cache_key(config: GlideConfig) -> str:
 
 
 def _lengths_cache_path(config: GlideConfig) -> str | None:
-    paths = _manifest_paths(config)
+    paths = _list_train_manifest_paths(config)
     if not paths:
         return None
     return paths[0] + ".glide-lengths.json"

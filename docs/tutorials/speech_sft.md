@@ -18,7 +18,7 @@ The `audio` field may be a path or a `{"array": [...], "sampling_rate": 16000}` 
 ## 2. Config
 
 A composed model is `encoder + projector + LLM`, each chosen independently. Example
-(`configs/examples/qwen3asr_csj10h_sft.yaml` is the full version):
+(`configs/examples/composed_speech_llm_csj_sft.yaml` is a complete, runnable one):
 
 ```yaml
 extends: [../data_root.yaml, ../base.yaml]
@@ -26,7 +26,7 @@ task: sft
 modality: speech
 
 model:
-  name: Qwen/Qwen3-1.7B               # the text LLM
+  model_name_or_id: Qwen/Qwen3-1.7B               # the text LLM
   attn_implementation: sdpa
   torch_dtype: bfloat16
 
@@ -35,9 +35,9 @@ special_tokens:
   additional: ["<audio>"]
 
 data:
-  corpus: csj                        # data_roots[corpus] from data_root.yaml
-  train: native_sft_10h/train.jsonl  # relative to the corpus root
-  eval: native_sft/dev.jsonl
+  root_key: csj                        # data_roots[root_key] from data_root.yaml
+  train_jsonl_path: native_sft/train.jsonl      # relative to the data root
+  eval_jsonl_path: native_sft/dev.jsonl
   response_field: text
   reference_field: text
   max_eval_samples: 200              # cap eval (AR generation is slow)
@@ -54,7 +54,8 @@ speech:
     freeze: false
   projector:
     name: identity                  # built-in: identity | mlp_gelu | qwen3_asr_proj
-  speed_perturb: { enabled: true, from_field: true, field_name: speed }
+  augment:
+    speed_perturb: { enabled: true, from_field: true, field_name: speed }
 
 template:
   system_prompt: "Please transcribe the speech to text."   # the instruction (system turn)
@@ -78,7 +79,7 @@ distributed:
 ## 3. Train
 
 ```bash
-glide sft configs/examples/qwen3asr_csj10h_sft.yaml          # 1 GPU
+glide sft configs/examples/composed_speech_llm_csj_sft.yaml   # 1 GPU
 ```
 
 Multi-GPU is driven by the YAML `distributed.nproc_per_node` (no `NPROC_PER_NODE`
@@ -87,7 +88,7 @@ cluster with `wait_gpu`, point it at the glide binary + config directly:
 
 ```bash
 wait_gpu 6 --server sacs01 --name asr_sft \
-  /path/to/glide/.venv/bin/glide sft /path/to/glide/configs/examples/qwen3asr_csj10h_sft.yaml
+  /path/to/glide/.venv/bin/glide sft /path/to/glide/configs/examples/composed_speech_llm_csj_sft.yaml
 ```
 
 ## How it works
@@ -115,7 +116,7 @@ eval:
 ```
 
 If reasoning is a separate field, set `data.reasoning_field`; glide passes it as the
-chat template's `reasoning_content`. See `qwen3asr_csj10h_think_sft.yaml`.
+chat template's `reasoning_content`. See `qwen3asr_aut_qwen3llm_csj_think_sft.yaml`.
 
 ## Other encoders / projectors
 

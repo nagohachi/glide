@@ -5,14 +5,14 @@
 # projector already maps the AuT output to Qwen3's 2048-d hidden space, so it slots in.
 # Requires the transformers==4.57.6 env (.venv-qwenasr; provides qwen_asr + Qwen3-ASR):
 #   UV_PROJECT_ENVIRONMENT=.venv-qwenasr uv run --no-sync glide sft \
-#       configs/examples/qwen3asr_aut_qwen3llm_think_sft.yaml
+#       configs/examples/qwen3asr_aut_qwen3llm_csj_think_sft.yaml
 extends: [../data_root.yaml, ../base.yaml]
 
 task: sft
 modality: speech
 
 model:
-  name: Qwen/Qwen3-1.7B          # the text LLM (thinking-capable)
+  model_name_or_id: Qwen/Qwen3-1.7B          # the text LLM (thinking-capable)
   attn_implementation: sdpa
   torch_dtype: bfloat16
   gradient_checkpointing: true
@@ -22,9 +22,9 @@ special_tokens:
   additional: ["<audio>"]
 
 data:
-  corpus: csj                    # data_roots[csj] from data_root.yaml
-  train: native_sft/train.jsonl  # records: {"audio": ..., "text": ...[, "think": ...]}
-  eval: native_sft/dev.jsonl
+  root_key: csj                    # data_roots[csj] from data_root.yaml
+  train_jsonl_path: native_sft/train.jsonl  # records: {"audio": ..., "text": ...[, "think": ...]}
+  eval_jsonl_path: native_sft/dev.jsonl
   audio_field: audio
   response_field: text           # the final answer (transcript)
   reference_field: text

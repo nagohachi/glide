@@ -21,11 +21,11 @@ task: grpo
 modality: text
 
 model:
-  name: Qwen/Qwen3-1.7B
+  model_name_or_id: Qwen/Qwen3-1.7B
 
 data:
-  train: data/rl_train.jsonl
-  eval: data/rl_eval.jsonl
+  train_jsonl_path: data/rl_train.jsonl
+  eval_jsonl_path: data/rl_eval.jsonl
 
 rl:
   rewards:

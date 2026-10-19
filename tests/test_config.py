@@ -23,10 +23,10 @@ def test_deep_merge_nested():
 
 def test_parse_override_args_types_and_nesting():
     overrides = parse_override_args(
-        ["--model.name", "Qwen/Q", "--training.learning_rate", "1e-5",
+        ["--model.model_name_or_id", "Qwen/Q", "--training.learning_rate", "1e-5",
          "--peft.enabled", "--data.lazy=false", "--logging.report_to", '["wandb"]']
     )
-    assert overrides["model"]["name"] == "Qwen/Q"
+    assert overrides["model"]["model_name_or_id"] == "Qwen/Q"
     assert overrides["training"]["learning_rate"] == 1e-5
     assert overrides["peft"]["enabled"] is True
     assert overrides["data"]["lazy"] is False
@@ -35,21 +35,24 @@ def test_parse_override_args_types_and_nesting():
 
 def test_extends_chain_and_override(tmp_path):
     (tmp_path / "base.yaml").write_text(
-        "task: sft\nmodel:\n  name: base-model\ntraining:\n  learning_rate: 2.0e-5\n"
+        "task: sft\nmodel:\n  model_name_or_id: base-model\n  attn_implementation: sdpa\n"
+        "training:\n  learning_rate: 2.0e-5\n"
     )
     (tmp_path / "run.yaml").write_text(
-        "extends: base.yaml\nmodel:\n  name: run-model\ntraining:\n  num_train_epochs: 3\n"
+        "extends: base.yaml\nmodel:\n  model_name_or_id: run-model\ntraining:\n  num_train_epochs: 3\n"
     )
     cfg = load_config(tmp_path / "run.yaml")
-    assert cfg.model.name == "run-model"  # child overrides parent
+    assert cfg.model.model_name_or_id == "run-model"  # child overrides parent
     assert cfg.training["learning_rate"] == 2.0e-5  # inherited
     assert cfg.training["num_train_epochs"] == 3
 
 
 def test_cli_override_beats_yaml(tmp_path):
-    (tmp_path / "run.yaml").write_text("model:\n  name: yaml-model\n")
-    cfg = load_config(tmp_path / "run.yaml", ["--model.name", "cli-model"], task="grpo")
-    assert cfg.model.name == "cli-model"
+    (tmp_path / "run.yaml").write_text(
+        "model:\n  model_name_or_id: yaml-model\n  attn_implementation: sdpa\n"
+    )
+    cfg = load_config(tmp_path / "run.yaml", ["--model.model_name_or_id", "cli-model"], task="grpo")
+    assert cfg.model.model_name_or_id == "cli-model"
     assert cfg.task is Task.GRPO
 
 
@@ -125,26 +128,53 @@ def test_apply_overrides_roundtrip():
     assert merged == {"a": {"b": 1, "c": 2}}
 
 
-def test_data_corpus_resolves_root(tmp_path):
+def test_data_root_key_resolves_root(tmp_path):
     (tmp_path / "run.yaml").write_text(
+        "model:\n  model_name_or_id: m\n  attn_implementation: sdpa\n"
         "data_roots:\n  csj: /abs/csj\n  cv: /abs/cv\n"
-        "data:\n  corpus: csj\n  train: a/train.jsonl\n  eval: a/dev.jsonl\n"
+        "data:\n  root_key: csj\n  train_jsonl_path: a/train.jsonl\n  eval_jsonl_path: a/dev.jsonl\n"
     )
     cfg = load_config(tmp_path / "run.yaml")
-    assert cfg.data.train == "/abs/csj/a/train.jsonl"
-    assert cfg.data.eval == "/abs/csj/a/dev.jsonl"
+    assert cfg.data.train_jsonl_path == "/abs/csj/a/train.jsonl"
+    assert cfg.data.eval_jsonl_path == "/abs/csj/a/dev.jsonl"
 
 
-def test_data_corpus_unknown_raises(tmp_path):
+def test_data_root_key_unknown_raises(tmp_path):
     (tmp_path / "run.yaml").write_text(
         "data_roots:\n  csj: /abs/csj\n"
-        "data:\n  corpus: missing\n  train: t.jsonl\n"
+        "data:\n  root_key: missing\n  train_jsonl_path: t.jsonl\n"
     )
     with pytest.raises(ValueError, match="not found in data_roots"):
         load_config(tmp_path / "run.yaml")
 
 
 def test_data_root_explicit_still_works(tmp_path):
-    (tmp_path / "run.yaml").write_text("data:\n  root: /abs/r\n  train: t.jsonl\n")
+    (tmp_path / "run.yaml").write_text(
+        "model:\n  model_name_or_id: m\n  attn_implementation: sdpa\n" "data:\n  root_dir: /abs/r\n  train_jsonl_path: t.jsonl\n"
+    )
     cfg = load_config(tmp_path / "run.yaml")
-    assert cfg.data.train == "/abs/r/t.jsonl"
+    assert cfg.data.train_jsonl_path == "/abs/r/t.jsonl"
+
+
+def test_missing_required_fields_raise(tmp_path):
+    """Sentinel defaults for model_name_or_id / attn_implementation must be rejected."""
+    (tmp_path / "run.yaml").write_text("task: sft\n")
+    with pytest.raises(ValueError, match="Missing required config values") as exc:
+        load_config(tmp_path / "run.yaml")
+    assert "model.model_name_or_id" in str(exc.value)
+    assert "model.attn_implementation" in str(exc.value)
+
+
+def test_peft_required_fields_only_when_enabled(tmp_path):
+    """LoRA settings are required only once peft.enabled is true."""
+    (tmp_path / "off.yaml").write_text(
+        "model:\n  model_name_or_id: m\n  attn_implementation: sdpa\npeft:\n  enabled: false\n"
+    )
+    load_config(tmp_path / "off.yaml")  # unset LoRA fields are fine while disabled
+
+    (tmp_path / "on.yaml").write_text(
+        "model:\n  model_name_or_id: m\n  attn_implementation: sdpa\npeft:\n  enabled: true\n"
+    )
+    with pytest.raises(ValueError, match="peft.r") as exc:
+        load_config(tmp_path / "on.yaml")
+    assert "peft.target_modules" in str(exc.value)

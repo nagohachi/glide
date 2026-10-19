@@ -7,7 +7,7 @@ modality: text     # text | speech | vision
 seed: 42
 
 model:
-  name: Qwen/Qwen3-1.7B
+  model_name_or_id: Qwen/Qwen3-1.7B
   attn_implementation: sdpa      # set flash_attention_2 with the flash-attn extra
   torch_dtype: bfloat16
   trust_remote_code: false
@@ -17,7 +17,7 @@ peft:
   enabled: false                 # true -> LoRA; false -> full fine-tuning
   r: 16
   lora_alpha: 32
-  lora_dropout: 0.05
+  lora_dropout: 0.0
   target_modules: all-linear
 
 special_tokens:
@@ -26,10 +26,10 @@ special_tokens:
   pad_to_multiple_of: 8
 
 data:
-  train: null
-  eval: null
+  train_jsonl_path: null
+  eval_jsonl_path: null
   lazy: true
-  num_workers: 4
+  num_workers: 0
 
 template:
   train_on_completions_only: true

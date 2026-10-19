@@ -11,7 +11,7 @@ task: gspo
 modality: speech
 
 model:
-  name: Qwen/Qwen3-1.7B
+  model_name_or_id: Qwen/Qwen3-1.7B
   attn_implementation: sdpa
   torch_dtype: bfloat16
   # Start the policy from a prior SFT checkpoint (composed-model state dict).
@@ -25,7 +25,7 @@ data:
   # Records are just {audio, text} -- the model rolls out transcripts live; no
   # precomputed hypotheses needed. `text` is both the SFT target field and the
   # RL reference scored by the CER reward.
-  train: data/asr_rl_train.jsonl
+  train_jsonl_path: data/asr_rl_train.jsonl
   audio_field: audio
   response_field: text
   reference_field: text
