@@ -5,20 +5,20 @@ from pathlib import Path
 
 import pytest
 
-from glide.config import GlideConfig, Modality, Task, load_config, version_output_dir
+from glide.config import GlideConfig, Modality, Task, load_config, resolve_versioned_output_dir
 from glide.config.loader import (
     apply_overrides,
     build_training_args,
-    deep_merge,
-    dict_to_dataclass,
+    convert_dict_to_dataclass,
+    merge_nested_dicts,
     parse_override_args,
 )
 
 
-def test_deep_merge_nested():
+def test_merge_nested_dicts():
     base = {"a": 1, "b": {"x": 1, "y": 2}}
     override = {"b": {"y": 3, "z": 4}, "c": 5}
-    assert deep_merge(base, override) == {"a": 1, "b": {"x": 1, "y": 3, "z": 4}, "c": 5}
+    assert merge_nested_dicts(base, override) == {"a": 1, "b": {"x": 1, "y": 3, "z": 4}, "c": 5}
 
 
 def test_parse_override_args_types_and_nesting():
@@ -65,17 +65,17 @@ def test_cyclic_extends_rejected(tmp_path):
 
 def test_unknown_key_raises():
     with pytest.raises(ValueError, match="Unknown config key"):
-        dict_to_dataclass(GlideConfig, {"model": {"nonexistent": 1}})
+        convert_dict_to_dataclass(GlideConfig, {"model": {"nonexistent": 1}})
 
 
 def test_enum_and_modality_hydration():
-    cfg = dict_to_dataclass(GlideConfig, {"task": "gspo", "modality": "speech"})
+    cfg = convert_dict_to_dataclass(GlideConfig, {"task": "gspo", "modality": "speech"})
     assert cfg.task is Task.GSPO
     assert cfg.modality is Modality.SPEECH
 
 
 def test_reward_spec_list_hydration():
-    cfg = dict_to_dataclass(
+    cfg = convert_dict_to_dataclass(
         GlideConfig,
         {"rl": {"rewards": [{"name": "cer", "weight": 1.0, "kwargs": {"reference_key": "ref"}}]}},
     )
@@ -85,11 +85,11 @@ def test_reward_spec_list_hydration():
 
 def test_version_output_dir_increments(tmp_path):
     now = dt.datetime(2026, 6, 21, 10, 30, 0)
-    first = version_output_dir(tmp_path, now=now)
+    first = resolve_versioned_output_dir(tmp_path, now=now)
     assert Path(first).name == "v0-20260621-103000"
     Path(first).mkdir()
     (tmp_path / "v3-old").mkdir()
-    second = version_output_dir(tmp_path, now=now)
+    second = resolve_versioned_output_dir(tmp_path, now=now)
     assert Path(second).name == "v4-20260621-103000"  # max(0,3)+1
 
 
@@ -113,10 +113,10 @@ def test_build_training_args_unknown_key_raises():
 
 
 def test_distributed_config_hydration_and_default():
-    cfg = dict_to_dataclass(GlideConfig, {})
+    cfg = convert_dict_to_dataclass(GlideConfig, {})
     assert cfg.distributed.nproc_per_node is None  # auto = all visible GPUs
     assert cfg.distributed.nnodes == 1
-    cfg2 = dict_to_dataclass(
+    cfg2 = convert_dict_to_dataclass(
         GlideConfig, {"distributed": {"nproc_per_node": 4, "nnodes": 2, "node_rank": 1}}
     )
     assert cfg2.distributed.nproc_per_node == 4
@@ -178,3 +178,12 @@ def test_peft_required_fields_only_when_enabled(tmp_path):
     with pytest.raises(ValueError, match="peft.r") as exc:
         load_config(tmp_path / "on.yaml")
     assert "peft.target_modules" in str(exc.value)
+
+
+def test_is_composed_speech_llm():
+    cfg = convert_dict_to_dataclass(GlideConfig, {"modality": "speech"})
+    assert not cfg.is_composed_speech_llm()  # built-in audio tower: loaded directly
+    cfg.speech.encoder.name = "whisper"
+    assert cfg.is_composed_speech_llm()
+    cfg.modality = Modality.TEXT
+    assert not cfg.is_composed_speech_llm()

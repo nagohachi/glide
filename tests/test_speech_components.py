@@ -60,9 +60,9 @@ def test_speed_perturb_changes_length():
 
 # --- config hydration of the nested speech schema ----------------------------
 def test_speech_config_nested_hydration():
-    from glide.config.loader import dict_to_dataclass
+    from glide.config.loader import convert_dict_to_dataclass
 
-    cfg = dict_to_dataclass(GlideConfig, {
+    cfg = convert_dict_to_dataclass(GlideConfig, {
         "modality": "speech",
         "speech": {
             "encoder": {"name": "whisper", "pretrained": "openai/whisper-small", "freeze": True},

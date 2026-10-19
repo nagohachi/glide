@@ -64,9 +64,7 @@ class GenerationEvaluator:
         self.batch_size = gen.batch_size
         # Composed Speech-LLM has no multimodal processor -> build inputs via the collator,
         # and generate at batch size 1 (SpeechLLM._splice right-pads -> batched gen breaks).
-        self._composed = bool(
-            config.modality is Modality.SPEECH and config.speech.encoder.name
-        )
+        self._composed = config.is_composed_speech_llm()
         self._composed_collator = None
         if self._composed:
             self.batch_size = 1

@@ -103,7 +103,7 @@ def load_model_and_processor(config: GlideConfig) -> LoadedModel:
     """
     import transformers
 
-    if config.modality is Modality.SPEECH and config.speech.encoder.name:
+    if config.is_composed_speech_llm():
         from .speech_llm import build_speech_llm
 
         model, tok, info = build_speech_llm(config)

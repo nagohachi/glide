@@ -3,10 +3,10 @@
 from .loader import (
     apply_overrides,
     build_training_args,
-    deep_merge,
-    dict_to_dataclass,
+    merge_nested_dicts,
+    convert_dict_to_dataclass,
     load_config,
-    version_output_dir,
+    resolve_versioned_output_dir,
 )
 from .schema import (
     GlideConfig,
@@ -47,9 +47,9 @@ __all__ = [
     "TemplateConfig",
     "VisionConfig",
     "load_config",
-    "deep_merge",
+    "merge_nested_dicts",
     "apply_overrides",
-    "dict_to_dataclass",
+    "convert_dict_to_dataclass",
     "build_training_args",
-    "version_output_dir",
+    "resolve_versioned_output_dir",
 ]

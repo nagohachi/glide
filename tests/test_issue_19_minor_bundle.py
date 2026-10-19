@@ -4,19 +4,19 @@ from glide.config.schema import GlideConfig
 
 
 def test_scalar_override_to_list_field_coerced():
-    from glide.config.loader import dict_to_dataclass
+    from glide.config.loader import convert_dict_to_dataclass
 
     # `--eval.metrics cer` arrives as the bare scalar "cer"; must become ["cer"], not
     # be iterated char-by-char (KeyError: No metric named 'c').
-    cfg = dict_to_dataclass(GlideConfig, {"eval": {"metrics": "cer"}})
+    cfg = convert_dict_to_dataclass(GlideConfig, {"eval": {"metrics": "cer"}})
     assert cfg.eval.metrics == ["cer"]
 
 
 def test_empty_section_hydrates_to_default():
-    from glide.config.loader import dict_to_dataclass
+    from glide.config.loader import convert_dict_to_dataclass
 
     # A YAML `training:` with everything commented out parses to None.
-    cfg = dict_to_dataclass(GlideConfig, {"training": None, "model": None})
+    cfg = convert_dict_to_dataclass(GlideConfig, {"training": None, "model": None})
     assert cfg.training == {}
     assert isinstance(cfg.model.model_name_or_id, str)
 

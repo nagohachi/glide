@@ -27,7 +27,7 @@ __all__ = ["build_sft_trainer"]
 
 def _build_collator(config: GlideConfig, loaded):
     """Build the multimodal collator: composed-speech, plugin, or the default."""
-    if config.modality is Modality.SPEECH and config.speech.encoder.name:
+    if config.is_composed_speech_llm():
         from ..data.composed_collator import ComposedSpeechCollator
 
         audio_token = config.special_tokens.audio_token
@@ -68,7 +68,7 @@ def _peft_config(config: GlideConfig):
     p = config.peft
     target_modules = p.target_modules
     modules_to_save = list(p.modules_to_save or [])
-    if config.modality is Modality.SPEECH and config.speech.encoder.name:
+    if config.is_composed_speech_llm():
         # Composed SpeechLLM is a plain nn.Module (not a PreTrainedModel). 'all-linear'
         # would LoRA-wrap EVERY nn.Linear in the tree: the from-scratch projector (its
         # random base weights frozen -> the modality bridge can never learn), the frozen
@@ -113,7 +113,7 @@ def _augment_training_defaults(config: GlideConfig) -> None:
         # (shared storage); safetensors refuses shared tensors, so use torch.save.
         # `save_safetensors` was removed from TrainingArguments in transformers 5.12;
         # only set it when the field still exists (else build_training_args rejects it).
-        if config.modality is Modality.SPEECH and config.speech.encoder.name:
+        if config.is_composed_speech_llm():
             import dataclasses as _dc
 
             if any(f.name == "save_safetensors" for f in _dc.fields(SFTConfig)):
@@ -179,7 +179,7 @@ def build_sft_trainer(config: GlideConfig):
             glide_warmup=config.speech.warmup,
             glide_target_lr=config.training.get("learning_rate", args.learning_rate),
             glide_warmup_ratio=config.training.get("warmup_ratio", 0.0),
-            glide_composed=bool(config.speech.encoder.name),
+            glide_composed=config.is_composed_speech_llm(),
         )
 
     # Let the generation callback log through the trainer.

@@ -70,5 +70,5 @@ def snapshot_config(config: GlideConfig, output_dir: str | os.PathLike) -> str:
     out.mkdir(parents=True, exist_ok=True)
     path = out / "glide_config.yaml"
     with open(path, "w") as f:
-        yaml.safe_dump(config.to_dict(), f, sort_keys=False, allow_unicode=True)
+        yaml.safe_dump(config.convert_to_dict(), f, sort_keys=False, allow_unicode=True)
     return str(path)
