@@ -241,12 +241,12 @@ def load_config(
 
     config = dict_to_dataclass(GlideConfig, merged)
     _resolve_data_paths(config)
-    _validate_required(config)
+    _reject_unset_required_fields(config)
     return config
 
 
-def _validate_required(config: GlideConfig) -> None:
-    """Reject sentinel values for fields that have no meaningful default.
+def _reject_unset_required_fields(config: GlideConfig) -> None:
+    """Raise if a field that has no meaningful default is still at its "not set" sentinel.
 
     Some settings genuinely have no value that is right for every run (which model
     to load, what attention kernel, the LoRA rank). Rather than shipping a default
