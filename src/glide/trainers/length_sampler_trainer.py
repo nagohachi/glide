@@ -13,19 +13,18 @@ from torch.utils.data import DataLoader, Dataset
 from transformers import TrainerCallback
 from trl import SFTTrainer
 
-from ..config.schema import ProjectorWarmupConfig
+from ..config.schema import GlideConfig, ProjectorWarmupConfig
 from ..data.sampler import LengthGroupedBatchSampler
-
 from ..logging_utils import get_logger
 
 _log = get_logger("trainers")
 
-__all__ = ["LengthGroupedSFTTrainer", "projector_warmup_lambdas", "_EpochShuffleCallback"]
+__all__ = ["LengthGroupedSFTTrainer", "build_projector_warmup_lambdas"]
 
 
-def projector_warmup_lambdas(*, projector_only_steps: int, num_training_steps: int,
-                             target_lr: float, projector_lr: float,
-                             full_warmup_steps: int = 0, warmup_ratio: float = 0.0):
+def build_projector_warmup_lambdas(*, projector_only_steps: int, num_training_steps: int,
+                                   target_lr: float, projector_lr: float,
+                                   full_warmup_steps: int = 0, warmup_ratio: float = 0.0):
     """Return ``(proj_lambda, rest_lambda)`` LR multipliers for the 2-phase schedule.
 
     Multipliers are relative to an optimizer base LR of ``projector_lr``:
@@ -39,19 +38,19 @@ def projector_warmup_lambdas(*, projector_only_steps: int, num_training_steps: i
     W = full_warmup_steps if full_warmup_steps > 0 else round(warmup_ratio * (T - P))
     W = max(1, min(W, max(1, T - P)))
 
-    def phase2(step):
+    def _compute_phase2_multiplier(step):
         s = step - P
         if s < W:
             return ratio * (s / W)
         return ratio * max(0.0, (T - P - s) / max(T - P - W, 1))
 
-    def proj_lam(step):
-        return (step / max(P, 1)) if step < P else phase2(step)
+    def _compute_projector_multiplier(step):
+        return (step / max(P, 1)) if step < P else _compute_phase2_multiplier(step)
 
-    def rest_lam(step):
-        return 0.0 if step < P else phase2(step)
+    def _compute_rest_multiplier(step):
+        return 0.0 if step < P else _compute_phase2_multiplier(step)
 
-    return proj_lam, rest_lam
+    return _compute_projector_multiplier, _compute_rest_multiplier
 
 
 class _EpochShuffleCallback(TrainerCallback):
@@ -67,27 +66,29 @@ class _EpochShuffleCallback(TrainerCallback):
 class LengthGroupedSFTTrainer(SFTTrainer):
     """``SFTTrainer`` that batches the training set by length (speech path).
 
-    Pass ``glide_lengths`` (per-sample lengths) and ``glide_batch_size`` via
-    ``kwargs``; everything else behaves like a normal ``SFTTrainer``.
+    Args:
+        glide_config: The run config. Supplies the dynamic-batching budget
+            (``speech.max_tokens_per_batch``), the sampler seed, the projector-warmup
+            schedule (``speech.warmup``) and whether the model is a composed
+            Speech-LLM. ``None`` behaves like a plain ``SFTTrainer``.
+        glide_lengths: Per-sample lengths of the training set. When given, training
+            batches come from a :class:`LengthGroupedBatchSampler`.
+
+    Everything else is forwarded to ``SFTTrainer``.
     """
 
-    def __init__(self, *args, glide_lengths=None, glide_batch_size=None,
-                 glide_max_tokens=None, glide_mega_batch_mult=50, glide_seed=0,
-                 glide_warmup: ProjectorWarmupConfig | None = None,
-                 glide_target_lr: float | None = None, glide_warmup_ratio: float = 0.0,
-                 glide_composed: bool = False, **kwargs):
-        self._glide_lengths = glide_lengths
-        self._glide_batch_size = glide_batch_size
-        self._glide_max_tokens = glide_max_tokens
-        self._glide_mega_batch_mult = glide_mega_batch_mult
-        self._glide_seed = glide_seed
+    #: Mega-batch size as a multiple of the batch size (see LengthGroupedBatchSampler).
+    MEGA_BATCH_MULT = 50
+
+    def __init__(self, *args, glide_config: GlideConfig | None = None,
+                 glide_lengths: list[int] | None = None, **kwargs):
+        config = glide_config
         #: Two-phase projector-warmup schedule (ProjectorWarmupConfig or None).
-        self._glide_warmup = glide_warmup
-        self._glide_target_lr = glide_target_lr
-        self._glide_warmup_ratio = glide_warmup_ratio
+        self._glide_warmup: ProjectorWarmupConfig | None = config.speech.warmup if config else None
+        self._glide_warmup_ratio = config.training.get("warmup_ratio", 0.0) if config else 0.0
         #: Composed SpeechLLM splices audio embeddings, changing the sequence length,
         #: so TRL's token-aligned entropy metric doesn't apply -> use the plain HF loss.
-        self._glide_composed = glide_composed
+        self._glide_composed = bool(config and config.is_composed_speech_llm())
         self._glide_batch_sampler = None
         super().__init__(*args, **kwargs)
         # SpeechLLM.forward has a **kwargs signature, so HF Trainer sets
@@ -106,10 +107,10 @@ class LengthGroupedSFTTrainer(SFTTrainer):
             # must NOT let accelerate re-shard the dataloader (see get_train_dataloader).
             self._glide_batch_sampler = LengthGroupedBatchSampler(
                 glide_lengths,
-                batch_size=glide_batch_size or self.args.per_device_train_batch_size,
-                max_tokens=glide_max_tokens,
-                mega_batch_mult=glide_mega_batch_mult,
-                seed=glide_seed,
+                batch_size=self.args.per_device_train_batch_size,
+                max_tokens=config.speech.max_tokens_per_batch if config else None,
+                mega_batch_mult=self.MEGA_BATCH_MULT,
+                seed=config.seed if config else self.args.seed,
                 drop_last=self.args.dataloader_drop_last,
                 num_replicas=self.accelerator.num_processes,
                 rank=self.accelerator.process_index,
@@ -119,17 +120,18 @@ class LengthGroupedSFTTrainer(SFTTrainer):
     # ------------------------------------------------------------------ #
     # Two-phase: projector-only warmup -> full fine-tuning (DDP-safe).
     # ------------------------------------------------------------------ #
-    def _warmup_active(self) -> bool:
+    def _is_warmup_active(self) -> bool:
         return bool(self._glide_warmup and self._glide_warmup.projector_only_steps > 0)
 
-    def _is_projector_param(self, name: str, warmup: ProjectorWarmupConfig) -> bool:
+    @staticmethod
+    def _is_projector_param(name: str, warmup: ProjectorWarmupConfig) -> bool:
         return any(pat in name for pat in warmup.projector_patterns)
 
     def create_optimizer(self, model=None):
         # Note: don't forward `model` to super() -- transformers 4.57 defines
         # create_optimizer(self) (no model arg); 5.x adds an optional one. Calling
         # with no args works on both.
-        if not self._warmup_active() or self.optimizer is not None:
+        if not self._is_warmup_active() or self.optimizer is not None:
             return super().create_optimizer()
         from torch.optim import AdamW
 
@@ -157,11 +159,11 @@ class LengthGroupedSFTTrainer(SFTTrainer):
         self.optimizer = optimizer
         if self.args.process_index == 0:
             _log.info(f"warmup: projector group: {sum(p.numel() for p in proj):,} params | "
-                  f"rest: {sum(p.numel() for p in rest):,} params")
+                      f"rest: {sum(p.numel() for p in rest):,} params")
         return optimizer
 
     def create_scheduler(self, num_training_steps: int, optimizer=None):
-        if not self._warmup_active():
+        if not self._is_warmup_active():
             return super().create_scheduler(num_training_steps, optimizer)
         from torch.optim.lr_scheduler import LambdaLR
 
@@ -169,8 +171,8 @@ class LengthGroupedSFTTrainer(SFTTrainer):
         opt = optimizer or self.optimizer
         assert opt is not None
         w = self._glide_warmup
-        target_lr = self._glide_target_lr if self._glide_target_lr is not None else self.args.learning_rate
-        proj_lam, rest_lam = projector_warmup_lambdas(
+        target_lr = self.args.learning_rate
+        proj_lam, rest_lam = build_projector_warmup_lambdas(
             projector_only_steps=w.projector_only_steps,
             num_training_steps=num_training_steps,
             target_lr=target_lr,
@@ -180,7 +182,7 @@ class LengthGroupedSFTTrainer(SFTTrainer):
         )
         if self.args.process_index == 0:
             _log.info(f"warmup: P={w.projector_only_steps} (proj 0->{w.projector_lr:g}), "
-                  f"then 0->{target_lr:g}, decay to 0 by {num_training_steps}")
+                      f"then 0->{target_lr:g}, decay to 0 by {num_training_steps}")
         scheduler = LambdaLR(opt, [proj_lam, rest_lam])
         self.lr_scheduler = scheduler
         return scheduler

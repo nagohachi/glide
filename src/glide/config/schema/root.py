@@ -51,17 +51,25 @@ class GlideConfig:
     #: is versioned to ``output_dir/v{N}-{datetime}`` at run start.
     training: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> dict[str, Any]:
+    def convert_to_dict(self) -> dict[str, Any]:
         """Return a plain (YAML-serializable) dict of the whole config."""
-        return _to_plain(dataclasses.asdict(self))
+        return _convert_enums_to_values(dataclasses.asdict(self))
+
+    def is_composed_speech_llm(self) -> bool:
+        """Whether this run assembles an encoder + projector + LLM Speech-LLM.
+
+        True for the speech modality with ``speech.encoder.name`` set; a speech model
+        with a built-in audio tower (``speech.encoder.name`` unset) is loaded directly.
+        """
+        return self.modality is Modality.SPEECH and bool(self.speech.encoder.name)
 
 
-def _to_plain(obj: Any) -> Any:
+def _convert_enums_to_values(obj: Any) -> Any:
     """Recursively convert enums to their values for serialization."""
     if isinstance(obj, Enum):
         return obj.value
     if isinstance(obj, dict):
-        return {k: _to_plain(v) for k, v in obj.items()}
+        return {k: _convert_enums_to_values(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
-        return [_to_plain(v) for v in obj]
+        return [_convert_enums_to_values(v) for v in obj]
     return obj

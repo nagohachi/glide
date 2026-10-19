@@ -9,6 +9,7 @@ from YAML (``eval.metrics: [wer, cer]``) or extended by plugins.
 * ``rouge`` -- ROUGE-1/2/L F-measure via ``rouge_score`` (translation/summarization).
 """
 
+import inspect
 import re
 import unicodedata
 from typing import Sequence
@@ -26,7 +27,8 @@ def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _prep(preds, refs, normalize):
+def _normalize_texts(preds, refs, normalize):
+    """Return ``(preds, refs)``, run through :func:`normalize_text` when ``normalize``."""
     preds = [normalize_text(p) if normalize else p for p in preds]
     refs = [normalize_text(r) if normalize else r for r in refs]
     return preds, refs
@@ -37,7 +39,7 @@ def compute_wer(predictions: Sequence[str], references: Sequence[str], *, normal
     """Word Error Rate (lower is better)."""
     import jiwer
 
-    preds, refs = _prep(list(predictions), list(references), normalize)
+    preds, refs = _normalize_texts(list(predictions), list(references), normalize)
     # jiwer errors on empty references; guard each.
     refs = [r if r else " " for r in refs]
     return {"wer": float(jiwer.wer(refs, preds))}
@@ -48,7 +50,7 @@ def compute_cer(predictions: Sequence[str], references: Sequence[str], *, normal
     """Character Error Rate (lower is better)."""
     import jiwer
 
-    preds, refs = _prep(list(predictions), list(references), normalize)
+    preds, refs = _normalize_texts(list(predictions), list(references), normalize)
     refs = [r if r else " " for r in refs]
     return {"cer": float(jiwer.cer(refs, preds))}
 
@@ -58,7 +60,7 @@ def compute_bleu(predictions: Sequence[str], references: Sequence[str], *, norma
     """Corpus BLEU (higher is better)."""
     import sacrebleu
 
-    preds, refs = _prep(list(predictions), list(references), normalize)
+    preds, refs = _normalize_texts(list(predictions), list(references), normalize)
     bleu = sacrebleu.corpus_bleu(preds, [refs])
     return {"bleu": float(bleu.score)}
 
@@ -68,7 +70,7 @@ def compute_rouge(predictions: Sequence[str], references: Sequence[str], *, norm
     """ROUGE-1/2/L F-measure averaged over the corpus (higher is better)."""
     from rouge_score import rouge_scorer
 
-    preds, refs = _prep(list(predictions), list(references), normalize)
+    preds, refs = _normalize_texts(list(predictions), list(references), normalize)
     scorer = rouge_scorer.RougeScorer(["rouge1", "rouge2", "rougeL"], use_stemmer=True)
     totals = {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0}
     n = max(1, len(preds))
@@ -89,17 +91,11 @@ def build_metric_fn(names: Sequence[str], *, normalize: bool = True):
     Returns:
         ``(predictions, references) -> dict[str, float]`` merging every metric.
     """
-    import inspect
-
     fns = [(name, metrics.get(name)) for name in names]
 
-    def _accepts_normalize(fn) -> bool:
-        try:
-            return "normalize" in inspect.signature(fn).parameters
-        except (TypeError, ValueError):
-            return False
-
-    def _compute(predictions: Sequence[str], references: Sequence[str]) -> dict[str, float]:
+    def _compute_metrics(
+        predictions: Sequence[str], references: Sequence[str]
+    ) -> dict[str, float]:
         out: dict[str, float] = {}
         for name, fn in fns:
             # BLEU must NOT be run through glide's lowercase/punct-strip normalizer:
@@ -107,11 +103,19 @@ def build_metric_fn(names: Sequence[str], *, normalize: bool = True):
             # comparable to published BLEU. Decide by signature inspection rather than
             # an `except TypeError` retry, which would double-invoke a metric whose own
             # body raised TypeError.
-            if _accepts_normalize(fn):
+            if _is_normalize_supported(fn):
                 norm = False if name == "bleu" else normalize
                 out.update(fn(predictions, references, normalize=norm))
             else:
                 out.update(fn(predictions, references))
         return out
 
-    return _compute
+    return _compute_metrics
+
+
+def _is_normalize_supported(fn) -> bool:
+    """Whether metric ``fn`` takes a ``normalize`` keyword."""
+    try:
+        return "normalize" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False

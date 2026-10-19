@@ -12,7 +12,7 @@ them from the config::
 No ``sys.path`` manipulation is needed -- ``glide`` imports the file directly.
 """
 
-from glide.plugins.rewards import completion_text
+from glide.plugins.rewards import extract_completion_text
 from glide.registry import metrics, rewards
 
 
@@ -20,16 +20,16 @@ from glide.registry import metrics, rewards
 def build_keyword_reward(keyword: str = "answer"):
     """Reward 1.0 when the completion contains ``keyword`` (case-insensitive)."""
 
-    def _reward(prompts=None, completions=None, **columns):
+    def _compute_reward(prompts=None, completions=None, **columns):
         completions = completions or []
         kw = keyword.lower()
-        return [1.0 if kw in completion_text(c).lower() else 0.0 for c in completions]
+        return [1.0 if kw in extract_completion_text(c).lower() else 0.0 for c in completions]
 
-    return _reward
+    return _compute_reward
 
 
 @metrics.register("exact_match_rate")
-def exact_match_rate(predictions, references, *, normalize=True):
+def compute_exact_match_rate(predictions, references, *, normalize=True):
     """Fraction of predictions exactly equal to their reference."""
     from glide.metrics import normalize_text
 

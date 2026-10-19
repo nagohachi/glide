@@ -15,7 +15,7 @@ import yaml
 
 from ..config.schema import GlideConfig
 
-__all__ = ["get_logger", "init_logging", "setup_logging", "snapshot_config"]
+__all__ = ["get_logger", "configure_stderr_logging", "configure_experiment_trackers", "snapshot_config"]
 
 #: Root logger name; every module logs under ``glide.<area>`` so the emitted
 #: prefix says where a line came from (``[glide.cli]``, ``[glide.eval]``, ...).
@@ -32,7 +32,7 @@ def get_logger(area: str | None = None) -> logging.Logger:
     return logging.getLogger(ROOT_LOGGER if area is None else f"{ROOT_LOGGER}.{area}")
 
 
-def init_logging(level: int = logging.INFO) -> None:
+def configure_stderr_logging(level: int = logging.INFO) -> None:
     """Attach a stderr handler to the ``glide`` logger. Idempotent.
 
     Formats as ``[glide.<area>] message``, matching the ``[glide]`` prefix the
@@ -48,7 +48,7 @@ def init_logging(level: int = logging.INFO) -> None:
     logger.propagate = False
 
 
-def setup_logging(config: GlideConfig) -> None:
+def configure_experiment_trackers(config: GlideConfig) -> None:
     """Configure wandb/tensorboard integrations from ``config.logging``."""
     log = config.logging
     if "wandb" in log.report_to:
@@ -70,5 +70,5 @@ def snapshot_config(config: GlideConfig, output_dir: str | os.PathLike) -> str:
     out.mkdir(parents=True, exist_ok=True)
     path = out / "glide_config.yaml"
     with open(path, "w") as f:
-        yaml.safe_dump(config.to_dict(), f, sort_keys=False, allow_unicode=True)
+        yaml.safe_dump(config.convert_to_dict(), f, sort_keys=False, allow_unicode=True)
     return str(path)

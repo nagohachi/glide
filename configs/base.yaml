@@ -33,7 +33,6 @@ data:
 
 template:
   train_on_completions_only: true
-  add_generation_prompt: true
   max_length: 2048
 
 packing:

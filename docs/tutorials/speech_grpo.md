@@ -37,7 +37,6 @@ rl:
       kwargs: { reference_key: reference }
     - name: format                  # optionally reward a <think>...</think> trace
       weight: 0.2
-  response_prefix: "<think>\n"      # optional CoT opener (if your TRL supports prefill)
 
 training:
   output_dir: outputs/asr_correction_grpo

@@ -28,8 +28,6 @@ class RLConfig:
     #: Use a vLLM rollout server for generation (``server`` / ``colocate``).
     use_vllm: bool = False
     vllm_mode: str = "server"
-    #: Prefill string prepended to every generation (e.g. a CoT opener).
-    response_prefix: str | None = None
 
     # --- Speech GSPO loop (glide.trainers.rl_speech) ---------------------- #
     # These drive the self-contained speech-in-the-loop GSPO/GRPO trainer, which
@@ -44,12 +42,8 @@ class RLConfig:
     max_completion_length: int = 256
     #: Clip range eps for the (sequence-level, GSPO) policy ratio.
     clip_eps: float = 0.2
-    #: KL-to-reference penalty coefficient (0 disables the reference model entirely).
-    kl_beta: float = 0.0
     #: Group-normalise advantages by their std (GRPO ``scale_rewards``).
     scale_rewards: bool = True
-    #: Inner policy updates per rollout batch (mu). 1 == on-policy (ratio == 1).
-    num_iterations: int = 1
     #: vLLM rollout server address (``server`` mode). The server runs the *same*
     #: composed model on a different GPU; weights are pushed after each update.
     vllm_server_host: str = "localhost"
@@ -59,5 +53,3 @@ class RLConfig:
     #: Shared path where the trainer writes the remapped policy weights for the vLLM
     #: server to reload (weight sync). Must be readable by the server host.
     vllm_sync_path: str = "outputs/vllm_sync_policy.safetensors"
-    #: Reward field on each record consumed by the CER reward (the reference text).
-    reference_key: str = "reference"

@@ -16,8 +16,9 @@ import datetime as _dt
 import json
 import os
 import re
+from enum import Enum
 from pathlib import Path
-from typing import Any, get_args, get_origin
+from typing import Any, get_args, get_origin, get_type_hints
 
 import yaml
 
@@ -25,10 +26,10 @@ from .schema import GlideConfig
 
 __all__ = [
     "load_config",
-    "deep_merge",
+    "merge_nested_dicts",
     "apply_overrides",
-    "dict_to_dataclass",
-    "version_output_dir",
+    "convert_dict_to_dataclass",
+    "resolve_versioned_output_dir",
     "build_training_args",
 ]
 
@@ -63,11 +64,11 @@ def _resolve_extends(path: Path, _seen: set[Path] | None = None) -> dict[str, An
     merged: dict[str, Any] = {}
     for parent in parents:
         parent_path = (path.parent / parent).resolve()
-        merged = deep_merge(merged, _resolve_extends(parent_path, _seen))
-    return deep_merge(merged, raw)
+        merged = merge_nested_dicts(merged, _resolve_extends(parent_path, _seen))
+    return merge_nested_dicts(merged, raw)
 
 
-def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+def merge_nested_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge ``override`` into ``base`` (override wins).
 
     Nested dicts are merged key-by-key; everything else (including lists) is
@@ -76,7 +77,7 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
     out = dict(base)
     for key, val in override.items():
         if key in out and isinstance(out[key], dict) and isinstance(val, dict):
-            out[key] = deep_merge(out[key], val)
+            out[key] = merge_nested_dicts(out[key], val)
         else:
             out[key] = val
     return out
@@ -102,7 +103,7 @@ def _coerce_scalar(text: str) -> Any:
 def parse_override_args(tokens: list[str]) -> dict[str, Any]:
     """Parse ``--dotted.key value`` (or ``--dotted.key=value``) tokens.
 
-    Returns a *nested* dict suitable for :func:`deep_merge`. Boolean flags given
+    Returns a *nested* dict suitable for :func:`merge_nested_dicts`. Boolean flags given
     without a value (``--peft.enabled``) become ``True``.
     """
     overrides: dict[str, Any] = {}
@@ -122,11 +123,12 @@ def parse_override_args(tokens: list[str]) -> dict[str, Any]:
         else:
             val = True  # bare flag
             i += 1
-        _set_nested(overrides, key.split("."), val)
+        _set_nested_value(overrides, key.split("."), val)
     return overrides
 
 
-def _set_nested(d: dict[str, Any], keys: list[str], value: Any) -> None:
+def _set_nested_value(d: dict[str, Any], keys: list[str], value: Any) -> None:
+    """Set ``d[keys[0]][keys[1]]...[keys[-1]] = value``, creating dicts on the way."""
     for k in keys[:-1]:
         d = d.setdefault(k, {})
         if not isinstance(d, dict):
@@ -136,13 +138,13 @@ def _set_nested(d: dict[str, Any], keys: list[str], value: Any) -> None:
 
 def apply_overrides(config_dict: dict[str, Any], tokens: list[str]) -> dict[str, Any]:
     """Merge parsed CLI ``tokens`` on top of ``config_dict``."""
-    return deep_merge(config_dict, parse_override_args(tokens))
+    return merge_nested_dicts(config_dict, parse_override_args(tokens))
 
 
 # --------------------------------------------------------------------------- #
 # dict -> dataclass hydration
 # --------------------------------------------------------------------------- #
-def dict_to_dataclass(cls: type, data: Any) -> Any:
+def convert_dict_to_dataclass(cls: type, data: Any) -> Any:
     """Recursively build dataclass ``cls`` from ``data`` (a dict).
 
     Unknown keys raise a ``ValueError`` so typos surface early. Enum fields accept
@@ -164,9 +166,7 @@ def dict_to_dataclass(cls: type, data: Any) -> Any:
 
     # Resolve real field types (handles forward refs / string annotations) before
     # hydrating, rather than reading the possibly-stringized ``field.type``.
-    import typing
-
-    hints = typing.get_type_hints(cls)
+    hints = get_type_hints(cls)
     kwargs: dict[str, Any] = {}
     for name in fields:
         if name not in data:
@@ -176,6 +176,7 @@ def dict_to_dataclass(cls: type, data: Any) -> Any:
 
 
 def _hydrate_value(ftype: Any, value: Any) -> Any:
+    """Convert one YAML value into the Python value of a field typed ``ftype``."""
     origin = get_origin(ftype)
     # An empty YAML section (`training:` with every key commented out) parses to None;
     # hydrate to the container default instead of leaving None to crash a later
@@ -189,11 +190,11 @@ def _hydrate_value(ftype: Any, value: Any) -> Any:
             return []
         return None
     # Enum field.
-    if isinstance(ftype, type) and issubclass(ftype, _enum_base()):
+    if isinstance(ftype, type) and issubclass(ftype, Enum):
         return ftype(value)
     # Nested dataclass.
     if dataclasses.is_dataclass(ftype):
-        return dict_to_dataclass(ftype, value)
+        return convert_dict_to_dataclass(ftype, value)
     # list[X] / tuple[X].
     if origin in (list, tuple):
         # A scalar CLI override to a list field (`--eval.metrics cer`) arrives as the bare
@@ -203,14 +204,8 @@ def _hydrate_value(ftype: Any, value: Any) -> Any:
             value = [value]
         (item_type,) = get_args(ftype) or (Any,)
         if dataclasses.is_dataclass(item_type):
-            return [dict_to_dataclass(item_type, v) for v in value]
+            return [convert_dict_to_dataclass(item_type, v) for v in value]
     return value
-
-
-def _enum_base():
-    from enum import Enum
-
-    return Enum
 
 
 # --------------------------------------------------------------------------- #
@@ -239,7 +234,7 @@ def load_config(
     if task is not None:
         merged["task"] = task
 
-    config = dict_to_dataclass(GlideConfig, merged)
+    config = convert_dict_to_dataclass(GlideConfig, merged)
     _resolve_data_paths(config)
     _reject_unset_required_fields(config)
     return config
@@ -300,17 +295,18 @@ def _resolve_data_paths(config: GlideConfig) -> None:
         root = config.data.root_dir
     if not root:
         return
+    config.data.train_jsonl_path = _join_data_root(root, config.data.train_jsonl_path)
+    config.data.eval_jsonl_path = _join_data_root(root, config.data.eval_jsonl_path)
+    config.data.test_jsonl_path = _join_data_root(root, config.data.test_jsonl_path)
 
-    def _join(p):
-        if p is None:
-            return None
-        if isinstance(p, list):
-            return [_join(x) for x in p]
-        return p if os.path.isabs(p) else os.path.join(root, p)
 
-    config.data.train_jsonl_path = _join(config.data.train_jsonl_path)
-    config.data.eval_jsonl_path = _join(config.data.eval_jsonl_path)
-    config.data.test_jsonl_path = _join(config.data.test_jsonl_path)
+def _join_data_root(root: str, path: str | list[str] | None) -> str | list[str] | None:
+    """Prefix ``root`` to a relative path (or to each path of a list); keep absolutes."""
+    if path is None:
+        return None
+    if isinstance(path, list):
+        return [_join_data_root(root, p) for p in path]
+    return path if os.path.isabs(path) else os.path.join(root, path)
 
 
 # --------------------------------------------------------------------------- #
@@ -319,7 +315,7 @@ def _resolve_data_paths(config: GlideConfig) -> None:
 _VERSION_RE = re.compile(r"^v(\d+)-")
 
 
-def version_output_dir(base_dir: str | os.PathLike, *, now: _dt.datetime | None = None) -> str:
+def resolve_versioned_output_dir(base_dir: str | os.PathLike, *, now: _dt.datetime | None = None) -> str:
     """Return ``base_dir/v{N}-{YYYYmmdd-HHMMSS}`` with an auto-incremented ``N``.
 
     ``N`` is one greater than the highest existing ``v{N}-*`` directory under
@@ -353,14 +349,15 @@ def build_training_args(config: GlideConfig, trl_config_cls: type, *, now=None):
 
     Only keys recognised by ``trl_config_cls`` (its dataclass fields) are passed;
     unknown keys raise ``ValueError`` so mistakes are caught. ``output_dir`` is
-    versioned via :func:`version_output_dir` unless ``training.no_version`` is set.
+    versioned via :func:`resolve_versioned_output_dir` unless ``training.no_version`` is set.
     """
     raw = dict(config.training)
     no_version = bool(raw.pop("no_version", False))
+    valid = {f.name for f in dataclasses.fields(trl_config_cls)}
 
     output_dir = raw.get("output_dir", "outputs")
     if not no_version:
-        output_dir = version_output_dir(output_dir, now=now)
+        output_dir = resolve_versioned_output_dir(output_dir, now=now)
     raw["output_dir"] = output_dir
 
     # Wire logging / seed / gradient checkpointing from the structured config
@@ -371,7 +368,7 @@ def build_training_args(config: GlideConfig, trl_config_cls: type, *, now=None):
     # Wire data.num_workers -> the dataloader worker count (it was otherwise never read;
     # actual workers came only from training.dataloader_num_workers). Explicit
     # training.dataloader_num_workers still wins.
-    if "dataloader_num_workers" in {f.name for f in dataclasses.fields(trl_config_cls)}:
+    if "dataloader_num_workers" in valid:
         raw.setdefault("dataloader_num_workers", config.data.num_workers)
     if config.model.gradient_checkpointing:
         raw.setdefault("gradient_checkpointing", True)
@@ -387,7 +384,7 @@ def build_training_args(config: GlideConfig, trl_config_cls: type, *, now=None):
     # bf16, which then fails TrainingArguments validation on a CPU-only host ("setup
     # doesn't support bf16/gpu"). Pin it to what the hardware actually supports unless the
     # user set bf16/fp16 explicitly.
-    if "bf16" not in raw and "fp16" not in raw and "bf16" in {f.name for f in dataclasses.fields(trl_config_cls)}:
+    if "bf16" not in raw and "fp16" not in raw and "bf16" in valid:
         try:
             import torch
 
@@ -395,7 +392,6 @@ def build_training_args(config: GlideConfig, trl_config_cls: type, *, now=None):
         except Exception:
             raw["bf16"] = False
 
-    valid = {f.name for f in dataclasses.fields(trl_config_cls)}
     unknown = set(raw) - valid
     if unknown:
         raise ValueError(

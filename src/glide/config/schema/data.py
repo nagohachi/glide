@@ -1,6 +1,6 @@
 """Dataset locations, chat templating and sequence packing."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 __all__ = ["DataConfig", "TemplateConfig", "PackingConfig"]
@@ -62,17 +62,11 @@ class DataConfig:
 class TemplateConfig:
     """Prompt/chat-template construction and loss masking."""
 
-    #: Named template in the registry, or ``None`` to use the tokenizer's
-    #: built-in chat template.
-    name: str | None = None
     #: Train only on the assistant/response tokens (completion-only masking).
     train_on_completions_only: bool = True
     #: When chat templates are used, the substring that marks the start of the
     #: assistant turn (used to locate the response span for masking).
     response_template: str | None = None
-    instruction_template: str | None = None
-    #: Add a generation prompt suffix when formatting prompts for generation.
-    add_generation_prompt: bool = True
     #: System prompt prepended to every conversation when one is not present.
     system_prompt: str | None = None
     max_length: int = 2048

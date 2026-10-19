@@ -8,10 +8,10 @@ from typing import Any
 
 import numpy as np
 
-__all__ = ["load_audio", "audio_num_samples", "speed_perturb"]
+__all__ = ["load_audio", "count_audio_samples", "perturb_speed"]
 
 
-def speed_perturb(waveform: np.ndarray, factor: float, sample_rate: int = 16000) -> np.ndarray:
+def perturb_speed(waveform: np.ndarray, factor: float, sample_rate: int = 16000) -> np.ndarray:
     """Kaldi-style speed perturbation: change tempo *and* pitch by ``factor``.
 
     ``factor > 1`` makes the utterance faster/shorter. Implemented by resampling the
@@ -51,13 +51,13 @@ def load_audio(ref: Any, target_sr: int = 16000) -> np.ndarray:
     return arr.astype(np.float32)
 
 
-def audio_num_samples(ref: Any, target_sr: int = 16000) -> int:
+def count_audio_samples(ref: Any, target_sr: int = 16000) -> int:
     """Return the number of samples for ``ref`` without fully decoding when possible.
 
     Used by the length-grouped sampler. For file paths this reads only the header
     via ``soundfile.info``; otherwise it falls back to decoding.
     """
-    if isinstance(ref, (str,)):
+    if isinstance(ref, str):
         try:
             import soundfile as sf
 
@@ -73,7 +73,7 @@ def audio_num_samples(ref: Any, target_sr: int = 16000) -> int:
             import warnings
 
             warnings.warn(
-                f"audio_num_samples: soundfile.info failed for {ref!r} ({exc}); "
+                f"count_audio_samples: soundfile.info failed for {ref!r} ({exc}); "
                 "falling back to a full decode (slow). Consider a data.duration_field.",
                 stacklevel=2,
             )

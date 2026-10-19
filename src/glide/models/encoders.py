@@ -18,14 +18,18 @@ builder so importing this module never requires those packages.
 import torch
 
 from ..config.schema import AudioEncoderConfig
+from ..logging_utils import get_logger
 from ..registry import audio_encoders
 from .plugins_base import AudioEncoder
 
-from ..logging_utils import get_logger
-
 _log = get_logger("models")
 
-__all__ = ["WhisperEncoder", "WaveformEncoder"]
+__all__ = [
+    "WhisperEncoder",
+    "WaveformEncoder",
+    "Qwen3ASRAudioTowerEncoder",
+    "QwenOmniAudioTowerEncoder",
+]
 
 
 # Friendly size aliases for Whisper.
@@ -39,12 +43,11 @@ _WHISPER_ALIASES = {
 }
 
 
-def _maybe_freeze(module, freeze: bool):
-    if freeze:
-        for p in module.parameters():
-            p.requires_grad_(False)
-        module.eval()
-    return module
+def _freeze_module(module) -> None:
+    """Stop gradients through every parameter of ``module`` and put it in eval mode."""
+    for p in module.parameters():
+        p.requires_grad_(False)
+    module.eval()
 
 
 class WhisperEncoder(AudioEncoder):
@@ -60,7 +63,8 @@ class WhisperEncoder(AudioEncoder):
         self.feature_extractor = AutoFeatureExtractor.from_pretrained(repo)
         self.model = WhisperModel.from_pretrained(repo, **kwargs).encoder
         self.output_dim = self.model.config.d_model
-        _maybe_freeze(self.model, freeze)
+        if freeze:
+            _freeze_module(self.model)
 
     def forward(self, input_features, attention_mask=None, **_):
         out = self.model(input_features=input_features).last_hidden_state
@@ -86,7 +90,8 @@ class WaveformEncoder(AudioEncoder):
         }.get(arch) or transformers.AutoModel
         self.model = cls.from_pretrained(repo, **kwargs)
         self.output_dim = self.model.config.hidden_size
-        _maybe_freeze(self.model, freeze)
+        if freeze:
+            _freeze_module(self.model)
 
     def forward(self, input_values, attention_mask=None, **_):
         out = self.model(input_values=input_values, attention_mask=attention_mask)
@@ -99,32 +104,168 @@ class WaveformEncoder(AudioEncoder):
 
 
 @audio_encoders.register("whisper", exist_ok=True)
-def build_whisper(cfg: AudioEncoderConfig, sample_rate: int = 16000):
+def build_whisper_encoder(cfg: AudioEncoderConfig, sample_rate: int = 16000):
     return WhisperEncoder(cfg.pretrained or "openai/whisper-large-v3",
                           freeze=cfg.freeze, **cfg.extra_kwargs)
 
 
 @audio_encoders.register("wavlm", exist_ok=True)
-def build_wavlm(cfg: AudioEncoderConfig, sample_rate: int = 16000):
+def build_wavlm_encoder(cfg: AudioEncoderConfig, sample_rate: int = 16000):
     return WaveformEncoder(cfg.pretrained or "microsoft/wavlm-large",
                            arch="wavlm", freeze=cfg.freeze, **cfg.extra_kwargs)
 
 
 @audio_encoders.register("xls_r", exist_ok=True)
-def build_xls_r(cfg: AudioEncoderConfig, sample_rate: int = 16000):
+def build_xls_r_encoder(cfg: AudioEncoderConfig, sample_rate: int = 16000):
     return WaveformEncoder(cfg.pretrained or "facebook/wav2vec2-xls-r-300m",
                            arch="wav2vec2", freeze=cfg.freeze, **cfg.extra_kwargs)
 
 
+class _QwenAudioTowerEncoder(AudioEncoder):
+    """Shared plumbing for the Qwen audio towers (AuT) used by Qwen3-ASR and Qwen-Omni.
+
+    Both towers consume the *flat varlen* form -- the valid mel frames of every
+    utterance concatenated along time, plus ``feature_lens`` -- and return a flat
+    ``(sum_frames, output_dim)`` tensor. Subclasses split that back per utterance;
+    :meth:`_pad_chunks` turns the pieces into the padded ``(B, T, H)`` + frame mask
+    that :class:`~glide.models.speech_llm.SpeechLLM` expects.
+    """
+
+    input_kind = "input_features"
+
+    def __init__(self, tower, feature_extractor, output_dim: int, freeze: bool):
+        super().__init__()
+        self.model = tower
+        self.feature_extractor = feature_extractor
+        self.output_dim = output_dim
+        if freeze:
+            _freeze_module(self.model)
+
+    @staticmethod
+    def _compute_feature_lengths(input_features, feature_attention_mask):
+        """Return the number of valid mel frames per utterance, shape ``(B,)``.
+
+        The mask may be at sample resolution (WhisperFeatureExtractor emits e.g. 480000
+        entries) or frame resolution; the length ratio maps either to mel frames.
+        """
+        n_frames = input_features.shape[-1]
+        if feature_attention_mask is not None:
+            mask_len = feature_attention_mask.shape[1]
+            valid = feature_attention_mask.sum(dim=1).float()
+            return (valid * n_frames / mask_len).round().long().clamp(1, n_frames)
+        return torch.full((input_features.shape[0],), n_frames,
+                          device=input_features.device, dtype=torch.long)
+
+    @staticmethod
+    def _concat_valid_frames(input_features, feat_lens):
+        """Concatenate each utterance's valid frames along time: ``(n_mels, sum_frames)``."""
+        return torch.cat(
+            [input_features[b][:, : int(feat_lens[b])] for b in range(input_features.shape[0])],
+            dim=1,
+        )
+
+    @staticmethod
+    def _get_hidden_states(output):
+        return output.last_hidden_state if hasattr(output, "last_hidden_state") else output
+
+    @staticmethod
+    def _pad_chunks(chunks, device):
+        """Right-pad per-utterance ``(L_i, H)`` chunks into ``(B, max L, H)`` + a frame mask."""
+        lmax = max(c.shape[0] for c in chunks)
+        hidden = chunks[0].new_zeros(len(chunks), lmax, chunks[0].shape[-1])
+        mask = torch.zeros(len(chunks), lmax, dtype=torch.long, device=device)
+        for b, c in enumerate(chunks):
+            hidden[b, : c.shape[0]] = c
+            mask[b, : c.shape[0]] = 1
+        return hidden, mask
+
+
+class Qwen3ASRAudioTowerEncoder(_QwenAudioTowerEncoder):
+    """Qwen3-ASR's audio tower (``thinker.audio_tower``); built by ``qwen3_asr_aut``.
+
+    Args:
+        output_lengths_fn: Qwen3-ASR's ``_get_feat_extract_output_lengths``, mapping
+            mel frames to post-CNN output frames (used to split the varlen output).
+        use_varlen: Run all utterances in one FA2 varlen call. When ``False`` (no
+            flash-attn) each utterance is encoded separately, which is also leak-free.
+    """
+
+    def __init__(self, tower, feature_extractor, output_dim: int, freeze: bool, *,
+                 output_lengths_fn, use_varlen: bool):
+        super().__init__(tower, feature_extractor, output_dim, freeze)
+        self._output_lengths_fn = output_lengths_fn
+        self.use_varlen = use_varlen
+
+    def forward(self, input_features, feature_attention_mask=None, **_):
+        feat_lens = self._compute_feature_lengths(input_features, feature_attention_mask)
+        if self.use_varlen:
+            # Varlen (FA2): ONE call over all utterances concatenated. The AuT builds
+            # cu_seqlens from feature_lens and FA2 attends block-diagonally per utterance
+            # (verified leak-free: audio0 output is unchanged when other audios change).
+            feats = self._concat_valid_frames(input_features, feat_lens)
+            flat = self._get_hidden_states(self.model(feats, feature_lens=feat_lens))
+            chunks = list(flat.split(self._output_lengths_fn(feat_lens).tolist(), dim=0))
+            return self._pad_chunks(chunks, flat.device)
+        # Fallback: per-audio loop (leak-free under any backend, but sequential/slower).
+        outs = []
+        for b in range(input_features.shape[0]):
+            fl = int(feat_lens[b])
+            out = self.model(input_features[b][:, :fl], feature_lens=feat_lens[b:b + 1])
+            outs.append(self._get_hidden_states(out))
+        return self._pad_chunks(outs, outs[0].device)
+
+
+class QwenOmniAudioTowerEncoder(_QwenAudioTowerEncoder):
+    """Qwen2.5-/Qwen3-Omni's audio tower; built by ``qwen_omni_aut``.
+
+    The Omni tower requires an explicit ``feature_lens`` (without it,
+    ``chunk_and_pad_features(..., None, ...)`` crashes) and always runs varlen.
+    """
+
+    def forward(self, input_features, feature_attention_mask=None, **_):
+        feat_lens = self._compute_feature_lengths(input_features, feature_attention_mask)
+        feats = self._concat_valid_frames(input_features, feat_lens)
+        flat = self._get_hidden_states(self.model(feats, feature_lens=feat_lens))
+        _, out_lens = self.model._get_feat_extract_output_lengths(feat_lens)
+        chunks = list(flat.split([int(x) for x in out_lens], dim=0))
+        return self._pad_chunks(chunks, flat.device)
+
+
+def _is_flash_attn_installed() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("flash_attn") is not None
+
+
+def _force_flash_attention(tower) -> None:
+    """Switch ``tower`` and its submodules to FA2 (no-op without flash-attn)."""
+    if not _is_flash_attn_installed():
+        return
+    for module in [tower, *tower.modules()]:
+        sub_config = getattr(module, "config", None)
+        if sub_config is not None:
+            try:
+                sub_config._attn_implementation = "flash_attention_2"
+            except Exception:
+                pass
+        if hasattr(module, "_attn_implementation"):
+            module._attn_implementation = "flash_attention_2"
+
+
+def _is_flash_attention_active(tower) -> bool:
+    """Whether ``tower`` runs FA2, i.e. whether its leak-free varlen path is usable."""
+    return (_is_flash_attn_installed()
+            and getattr(tower.config, "_attn_implementation", None) == "flash_attention_2")
+
+
 @audio_encoders.register("qwen3_asr_aut", exist_ok=True)
-def build_qwen3_asr_aut(cfg: AudioEncoderConfig, sample_rate: int = 16000):
+def build_qwen3_asr_audio_tower(cfg: AudioEncoderConfig, sample_rate: int = 16000):
     """Qwen3-ASR audio tower (requires the ``qwen_asr`` package).
 
     Extracts ``.thinker.audio_tower`` from a Qwen3-ASR checkpoint and its processor's
     feature extractor. Input is log-mel ``input_features`` + ``feature_attention_mask``.
     """
     import importlib
-    import importlib.util
 
     from transformers import AutoConfig, AutoModel, AutoProcessor
 
@@ -136,8 +277,6 @@ def build_qwen3_asr_aut(cfg: AudioEncoderConfig, sample_rate: int = 16000):
     AutoConfig.register("qwen3_asr", backend.Qwen3ASRConfig, exist_ok=True)
     AutoModel.register(backend.Qwen3ASRConfig, backend.Qwen3ASRForConditionalGeneration,
                        exist_ok=True)
-    # Per-audio output length (post-CNN) -- used to split the varlen output per utterance.
-    _out_len_fn = backend.modeling_qwen3_asr._get_feat_extract_output_lengths
 
     repo = cfg.pretrained or "Qwen/Qwen3-ASR-1.7B"
     full = AutoModel.from_pretrained(repo, **cfg.extra_kwargs)
@@ -149,78 +288,20 @@ def build_qwen3_asr_aut(cfg: AudioEncoderConfig, sample_rate: int = 16000):
     # flash_attention_2; under sdpa/eager a concatenated call leaks across utterances. So
     # force FA2 on the tower -> enables the fast leak-free *varlen* path (one call for the
     # whole batch). If FA2 isn't available, fall back to the per-audio loop (leak-free too).
-    use_varlen = False
-    if importlib.util.find_spec("flash_attn") is not None:
-        for _m in [tower, *tower.modules()]:
-            _c = getattr(_m, "config", None)
-            if _c is not None:
-                try:
-                    _c._attn_implementation = "flash_attention_2"
-                except Exception:
-                    pass
-            if hasattr(_m, "_attn_implementation"):
-                _m._attn_implementation = "flash_attention_2"
-        use_varlen = getattr(tower.config, "_attn_implementation", None) == "flash_attention_2"
+    _force_flash_attention(tower)
+    use_varlen = _is_flash_attention_active(tower)
     _log.info(
         "qwen3_asr_aut: %s",
         "FA2 varlen (batched, leak-free)" if use_varlen else "per-audio loop (sdpa fallback)",
     )
-
-    class _Tower(AudioEncoder):
-        input_kind = "input_features"
-
-        use_varlen = False  # set on the instance below
-
-        def __init__(self):
-            super().__init__()
-            self.model = tower
-            self.feature_extractor = AutoProcessor.from_pretrained(repo).feature_extractor
-            self.output_dim = out_dim
-            self.use_varlen = use_varlen
-            _maybe_freeze(self.model, cfg.freeze)
-
-        def _feat_lens(self, input_features, feature_attention_mask):
-            n_frames = input_features.shape[-1]
-            if feature_attention_mask is not None:
-                # WhisperFeatureExtractor's attention_mask is sample-level (e.g. 480000);
-                # convert valid samples -> valid mel frames (= samples * n_frames / mask_len).
-                mask_len = feature_attention_mask.shape[1]
-                valid = feature_attention_mask.sum(dim=1).float()
-                return (valid * n_frames / mask_len).round().long().clamp(1, n_frames)
-            return torch.full((input_features.shape[0],), n_frames,
-                              device=input_features.device, dtype=torch.long)
-
-        @staticmethod
-        def _pack(chunks, device):
-            lmax = max(c.shape[0] for c in chunks)
-            hidden = chunks[0].new_zeros(len(chunks), lmax, chunks[0].shape[-1])
-            mask = torch.zeros(len(chunks), lmax, dtype=torch.long, device=device)
-            for b, c in enumerate(chunks):
-                hidden[b, : c.shape[0]] = c
-                mask[b, : c.shape[0]] = 1
-            return hidden, mask
-
-        def forward(self, input_features, feature_attention_mask=None, **_):
-            feat_lens = self._feat_lens(input_features, feature_attention_mask)
-            if self.use_varlen:
-                # Varlen (FA2): ONE call over all utterances concatenated. The AuT builds
-                # cu_seqlens from feature_lens and FA2 attends block-diagonally per utterance
-                # (verified leak-free: audio0 output is unchanged when other audios change).
-                feats = torch.cat([input_features[b][:, : int(feat_lens[b])]
-                                   for b in range(input_features.shape[0])], dim=1)
-                out = self.model(feats, feature_lens=feat_lens)
-                flat = out.last_hidden_state if hasattr(out, "last_hidden_state") else out
-                chunks = list(flat.split(_out_len_fn(feat_lens).tolist(), dim=0))
-                return self._pack(chunks, flat.device)
-            # Fallback: per-audio loop (leak-free under any backend, but sequential/slower).
-            outs = []
-            for b in range(input_features.shape[0]):
-                fl = int(feat_lens[b])
-                out = self.model(input_features[b][:, :fl], feature_lens=feat_lens[b:b + 1])
-                outs.append(out.last_hidden_state if hasattr(out, "last_hidden_state") else out)
-            return self._pack(outs, outs[0].device)
-
-    return _Tower()
+    return Qwen3ASRAudioTowerEncoder(
+        tower,
+        AutoProcessor.from_pretrained(repo).feature_extractor,
+        out_dim,
+        cfg.freeze,
+        output_lengths_fn=backend.modeling_qwen3_asr._get_feat_extract_output_lengths,
+        use_varlen=use_varlen,
+    )
 
 
 def _find_audio_tower(module):
@@ -242,7 +323,7 @@ def _find_audio_tower(module):
 
 
 @audio_encoders.register("qwen_omni_aut", exist_ok=True)
-def build_qwen_omni_aut(cfg: AudioEncoderConfig, sample_rate: int = 16000):
+def build_qwen_omni_audio_tower(cfg: AudioEncoderConfig, sample_rate: int = 16000):
     """Qwen-Omni audio tower — **Qwen2.5-Omni or Qwen3-Omni**, selected by ``pretrained``.
 
     Version-agnostic: loads via ``AutoModel`` (the right Omni class is chosen from the
@@ -259,60 +340,6 @@ def build_qwen_omni_aut(cfg: AudioEncoderConfig, sample_rate: int = 16000):
     # the *internal* width. Prefer output_dim so the projector's in_dim matches reality.
     out_dim = int(getattr(tower.config, "output_dim", None)
                   or getattr(tower.config, "d_model", 0))
-
-    return _build_omni_tower(tower, repo, out_dim, cfg.freeze)
-
-
-def _build_omni_tower(tower, repo: str, out_dim: int, freeze: bool):
-    from transformers import AutoFeatureExtractor
-
-    class _OmniTower(AudioEncoder):
-        input_kind = "input_features"
-
-        def __init__(self):
-            super().__init__()
-            self.model = tower
-            self.feature_extractor = AutoFeatureExtractor.from_pretrained(repo)
-            self.output_dim = out_dim
-            _maybe_freeze(self.model, freeze)
-
-        def _feat_lens(self, input_features, feature_attention_mask):
-            n_frames = input_features.shape[-1]
-            if feature_attention_mask is not None:
-                # Normalize whatever resolution the mask is at (sample- or frame-level)
-                # to valid mel frames via the length ratio.
-                mask_len = feature_attention_mask.shape[1]
-                valid = feature_attention_mask.sum(dim=1).float()
-                return (valid * n_frames / mask_len).round().long().clamp(1, n_frames)
-            return torch.full((input_features.shape[0],), n_frames,
-                              device=input_features.device, dtype=torch.long)
-
-        @staticmethod
-        def _pack(chunks, device):
-            lmax = max(c.shape[0] for c in chunks)
-            hidden = chunks[0].new_zeros(len(chunks), lmax, chunks[0].shape[-1])
-            mask = torch.zeros(len(chunks), lmax, dtype=torch.long, device=device)
-            for b, c in enumerate(chunks):
-                hidden[b, : c.shape[0]] = c
-                mask[b, : c.shape[0]] = 1
-            return hidden, mask
-
-        def forward(self, input_features, feature_attention_mask=None, **_):
-            # The Omni audio tower consumes the *flat varlen* form (num_mel_bins,
-            # sum_frames) with an explicit feature_lens (without it,
-            # chunk_and_pad_features(..., None, ...) crashes), and returns a flat
-            # (sum_pooled_frames, output_dim) tensor -- NOT (B, T, H). Concatenate the
-            # valid mel frames across utterances, then split the output back per-utterance
-            # into the padded (B, T, H) that SpeechLLM._encode_audio expects.
-            feat_lens = self._feat_lens(input_features, feature_attention_mask)
-            feats = torch.cat(
-                [input_features[b][:, : int(feat_lens[b])] for b in range(input_features.shape[0])],
-                dim=1,
-            )
-            out = self.model(feats, feature_lens=feat_lens)
-            flat = out.last_hidden_state if hasattr(out, "last_hidden_state") else out
-            _, out_lens = self.model._get_feat_extract_output_lengths(feat_lens)
-            chunks = list(flat.split([int(x) for x in out_lens], dim=0))
-            return self._pack(chunks, flat.device)
-
-    return _OmniTower()
+    return QwenOmniAudioTowerEncoder(
+        tower, AutoFeatureExtractor.from_pretrained(repo), out_dim, cfg.freeze
+    )

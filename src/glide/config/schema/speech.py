@@ -136,8 +136,6 @@ class SpeechConfig:
     #: The order *within* the epoch is reshuffled every epoch (see
     #: :class:`glide.data.sampler.LengthGroupedBatchSampler`).
     length_grouped_sampler: bool = True
-    #: Bucket granularity in frames/samples for the length sampler.
-    length_bucket_size: int = 0
     #: Dynamic batching budget: max summed length (audio samples) per batch. When
     #: set, the per-device batch size *varies* (more short utterances per batch).
     #: ``per_device_train_batch_size`` then acts as a hard cap on the count.

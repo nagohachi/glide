@@ -6,7 +6,7 @@ from glide.config.schema import SpecAugmentConfig
 
 
 def test_specaugment_per_sample_and_length_scaled():
-    from glide.data.specaugment import spec_augment
+    from glide.data.specaugment import apply_spec_augment
 
     cfg = SpecAugmentConfig(enabled=True, freq_mask_width=2, num_freq_mask=1,
                             time_mask_width_ratio=0.3, num_time_mask=3)
@@ -16,7 +16,7 @@ def test_specaugment_per_sample_and_length_scaled():
     attn = torch.ones(b, time)
     attn[0, 10:] = 0
     gen = torch.Generator().manual_seed(0)
-    out = spec_augment(feats, cfg, attention_mask=attn, generator=gen)
+    out = apply_spec_augment(feats, cfg, attention_mask=attn, generator=gen)
 
     # Per-sample masks differ (batch-wide masking would make all rows identical).
     assert not torch.equal(out[0], out[1])

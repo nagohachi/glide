@@ -50,9 +50,7 @@ rl:
   top_p: 1.0
   max_completion_length: 128
   clip_eps: 0.2
-  kl_beta: 0.0                   # no reference model (set >0 to add a KL penalty)
   scale_rewards: true
-  reference_key: text
   rewards:
     - name: cer                  # reward = 1 - CER(completion, reference)
       weight: 1.0

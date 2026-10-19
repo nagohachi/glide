@@ -1,6 +1,6 @@
 """Vision modality settings."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 __all__ = ["VisionConfig"]
 

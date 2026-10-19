@@ -15,14 +15,19 @@ import torch
 import torch.nn as nn
 
 from ..config.schema import ProjectorConfig
+from ..logging_utils import get_logger
 from ..registry import projectors
 from .plugins_base import Projector
 
-from ..logging_utils import get_logger
-
 _log = get_logger("models")
 
-__all__ = ["MLPGeLUProjector"]
+__all__ = ["MLPGeLUProjector", "IdentityProjector"]
+
+
+def _freeze_parameters(module: nn.Module) -> None:
+    """Stop gradients through every parameter of ``module``."""
+    for p in module.parameters():
+        p.requires_grad_(False)
 
 
 class MLPGeLUProjector(Projector):
@@ -76,7 +81,7 @@ class IdentityProjector(Projector):
 
 
 @projectors.register("identity", exist_ok=True)
-def build_identity(cfg: ProjectorConfig, in_dim: int, out_dim: int):
+def build_identity_projector(cfg: ProjectorConfig, in_dim: int, out_dim: int):
     # IdentityProjector cannot downsample (frame stacking would change the feature dim),
     # yet SpeechLLM still divides audio_lengths by projector.downsample -> the spliced
     # audio would be silently truncated. Reject the incompatible combination loudly.
@@ -90,12 +95,11 @@ def build_identity(cfg: ProjectorConfig, in_dim: int, out_dim: int):
 
 
 @projectors.register("mlp_gelu", exist_ok=True)
-def build_mlp_gelu(cfg: ProjectorConfig, in_dim: int, out_dim: int):
+def build_mlp_gelu_projector(cfg: ProjectorConfig, in_dim: int, out_dim: int):
     proj = MLPGeLUProjector(in_dim, out_dim, hidden_dim=cfg.hidden_dim,
                             num_layers=cfg.num_layers, downsample=cfg.downsample)
     if cfg.freeze:
-        for p in proj.parameters():
-            p.requires_grad_(False)
+        _freeze_parameters(proj)
     return proj
 
 
@@ -161,12 +165,13 @@ _QWEN_PROJ_KEY_MAP = {
 }
 
 
-@projectors.register("qwen3_asr_proj", exist_ok=True)
-def build_qwen3_asr_proj(cfg: ProjectorConfig, in_dim: int, out_dim: int):
-    """Pretrained Qwen3-ASR audio projector (``proj1``/``proj2`` MLP).
+def _build_pretrained_qwen_projector(
+    name: str, cfg: ProjectorConfig, in_dim: int, out_dim: int
+) -> MLPGeLUProjector:
+    """Build the 2-layer Qwen audio projector and warm-start it from ``cfg.pretrained``.
 
-    Mirrors Qwen3-ASR's projector geometry (MLP) and, when ``pretrained`` is given,
-    loads its weights. Falls back to a fresh MLP if weights can't be matched.
+    If the checkpoint's ``audio_tower.proj*`` weights cannot be matched, a warning is
+    logged and the projector keeps its fresh initialization.
     """
     proj = MLPGeLUProjector(in_dim, out_dim, hidden_dim=cfg.hidden_dim or out_dim,
                             num_layers=2, downsample=cfg.downsample)
@@ -177,29 +182,20 @@ def build_qwen3_asr_proj(cfg: ProjectorConfig, in_dim: int, out_dim: int):
         except Exception as exc:  # pragma: no cover - depends on checkpoint layout
             _log.warning(
                 "%s: could not load pretrained weights (%s); "
-                "using a freshly-initialized projector.", "qwen3_asr_proj", exc
+                "using a freshly-initialized projector.", name, exc
             )
     if cfg.freeze:
-        for p in proj.parameters():
-            p.requires_grad_(False)
+        _freeze_parameters(proj)
     return proj
+
+
+@projectors.register("qwen3_asr_proj", exist_ok=True)
+def build_qwen3_asr_projector(cfg: ProjectorConfig, in_dim: int, out_dim: int):
+    """Pretrained Qwen3-ASR audio projector (``proj1``/``proj2`` MLP)."""
+    return _build_pretrained_qwen_projector("qwen3_asr_proj", cfg, in_dim, out_dim)
 
 
 @projectors.register("qwen_omni_proj", exist_ok=True)
-def build_qwen_omni_proj(cfg: ProjectorConfig, in_dim: int, out_dim: int):
+def build_qwen_omni_projector(cfg: ProjectorConfig, in_dim: int, out_dim: int):
     """Pretrained Qwen2.5/Qwen3-Omni audio projector."""
-    proj = MLPGeLUProjector(in_dim, out_dim, hidden_dim=cfg.hidden_dim or out_dim,
-                            num_layers=2, downsample=cfg.downsample)
-    if cfg.pretrained:
-        try:
-            _load_state_into(proj, cfg.pretrained, key_filter="audio_tower.proj",
-                             key_map=_QWEN_PROJ_KEY_MAP)
-        except Exception as exc:  # pragma: no cover
-            _log.warning(
-                "%s: could not load pretrained weights (%s); "
-                "using a freshly-initialized projector.", "qwen_omni_proj", exc
-            )
-    if cfg.freeze:
-        for p in proj.parameters():
-            p.requires_grad_(False)
-    return proj
+    return _build_pretrained_qwen_projector("qwen_omni_proj", cfg, in_dim, out_dim)
