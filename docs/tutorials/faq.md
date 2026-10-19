@@ -79,17 +79,3 @@ CUDA_VISIBLE_DEVICES=0,1,2 glide sft configs/my_sft.yaml
 
 An explicit `nproc_per_node` larger than the visible GPU count is clamped, with
 a warning.
-
-## Setting these permanently
-
-Put them in the job script or shell profile that launches glide, not in the
-library:
-
-```bash
-# ~/.bashrc, or your scheduler's job wrapper
-export NCCL_IB_DISABLE=1        # this node's IB is broken
-export NCCL_P2P_DISABLE=1       # ...and so is its PCIe P2P
-```
-
-Because glide uses `setdefault` for `NCCL_DEBUG`, anything you export always
-wins.
