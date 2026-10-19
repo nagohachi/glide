@@ -38,24 +38,21 @@ class SpeechLLM(nn.Module):
 
     def gradient_checkpointing_enable(self, **kwargs):
         """Delegate gradient checkpointing to the LLM (and the trainable encoder)."""
-        if hasattr(self.llm, "gradient_checkpointing_enable"):
-            self.llm.gradient_checkpointing_enable(**kwargs)
-        enc = getattr(self.encoder, "model", None)
-        if enc is not None and hasattr(enc, "gradient_checkpointing_enable"):
-            try:
-                enc.gradient_checkpointing_enable(**kwargs)
-            except Exception:
-                pass  # some encoders don't support it; the LLM still benefits
+        self._toggle_gradient_checkpointing("gradient_checkpointing_enable", **kwargs)
 
     def gradient_checkpointing_disable(self):
-        if hasattr(self.llm, "gradient_checkpointing_disable"):
-            self.llm.gradient_checkpointing_disable()
+        self._toggle_gradient_checkpointing("gradient_checkpointing_disable")
+
+    def _toggle_gradient_checkpointing(self, method: str, **kwargs) -> None:
+        """Call ``method`` on the LLM and, best effort, on the wrapped encoder model."""
+        if hasattr(self.llm, method):
+            getattr(self.llm, method)(**kwargs)
         enc = getattr(self.encoder, "model", None)
-        if enc is not None and hasattr(enc, "gradient_checkpointing_disable"):
+        if enc is not None and hasattr(enc, method):
             try:
-                enc.gradient_checkpointing_disable()
+                getattr(enc, method)(**kwargs)
             except Exception:
-                pass
+                pass  # some encoders don't support it; the LLM still benefits
 
     def _encode_audio(self, audio_inputs: dict):
         """Return ``(audio_embeds (B,Ta,H), audio_lengths (B,))`` after projection."""
@@ -72,7 +69,8 @@ class SpeechLLM(nn.Module):
         lengths = (lengths // self.downsample).clamp(max=embeds.shape[1])
         return embeds, lengths
 
-    def _splice(self, input_ids, attention_mask, labels, audio_embeds, audio_lengths):
+    def _splice_audio_embeddings(self, input_ids, attention_mask, labels, audio_embeds,
+                                 audio_lengths):
         """Replace each sample's single ``<audio>`` marker with its audio frames."""
         device = input_ids.device
         embed_layer = self.get_input_embeddings()
@@ -117,7 +115,7 @@ class SpeechLLM(nn.Module):
         return out_embeds, out_mask, out_labels
 
     @staticmethod
-    def _encoder_inputs(input_features, feature_attention_mask, input_values, audio_attention_mask):
+    def _build_encoder_inputs(input_features, feature_attention_mask, input_values, audio_attention_mask):
         """Build the encoder's kwargs from the (collision-free) audio inputs."""
         enc: dict = {}
         if input_features is not None:
@@ -130,16 +128,25 @@ class SpeechLLM(nn.Module):
                 enc["attention_mask"] = audio_attention_mask  # encoder's own arg name
         return enc
 
+    def _build_inputs_embeds(self, input_ids, attention_mask, labels, *, input_features,
+                             feature_attention_mask, input_values, audio_attention_mask):
+        """Encode the audio and splice it in: ``(inputs_embeds, attention_mask, labels)``."""
+        enc = self._build_encoder_inputs(input_features, feature_attention_mask,
+                                         input_values, audio_attention_mask)
+        audio_embeds, audio_lengths = self._encode_audio(enc)
+        return self._splice_audio_embeddings(
+            input_ids, attention_mask, labels, audio_embeds, audio_lengths
+        )
+
     def forward(self, input_ids=None, attention_mask=None, labels=None,
                 input_features=None, feature_attention_mask=None,
                 input_values=None, audio_attention_mask=None, **kwargs):
         # Ignore extra Trainer kwargs (use_cache, num_items_in_batch, ...): training
         # uses no cache and the loss is computed by the LLM over the spliced labels.
-        enc = self._encoder_inputs(input_features, feature_attention_mask,
-                                   input_values, audio_attention_mask)
-        audio_embeds, audio_lengths = self._encode_audio(enc)
-        inputs_embeds, attn, new_labels = self._splice(
-            input_ids, attention_mask, labels, audio_embeds, audio_lengths
+        inputs_embeds, attn, new_labels = self._build_inputs_embeds(
+            input_ids, attention_mask, labels,
+            input_features=input_features, feature_attention_mask=feature_attention_mask,
+            input_values=input_values, audio_attention_mask=audio_attention_mask,
         )
         out = self.llm(inputs_embeds=inputs_embeds, attention_mask=attn, labels=new_labels)
         # Stash next-token accuracy counts over the spliced labels (the trainer reads
@@ -155,9 +162,9 @@ class SpeechLLM(nn.Module):
                 self._tok_total = mask.sum()
         return out
 
-    def logits_with_audio(self, input_ids, attention_mask,
-                          input_features=None, feature_attention_mask=None,
-                          input_values=None, audio_attention_mask=None):
+    def compute_logits_with_audio(self, input_ids, attention_mask,
+                                  input_features=None, feature_attention_mask=None,
+                                  input_values=None, audio_attention_mask=None):
         """Run a (grad-enabled) forward and return ``(logits, spliced_attention_mask)``.
 
         Unlike :meth:`forward` (which folds the loss in and hides the post-splice
@@ -167,11 +174,11 @@ class SpeechLLM(nn.Module):
         ``spliced_attention_mask`` (right-padded) gives each row's valid length, which
         is needed to locate the (trailing) completion block past the audio splice.
         """
-        enc = self._encoder_inputs(input_features, feature_attention_mask,
-                                   input_values, audio_attention_mask)
-        audio_embeds, audio_lengths = self._encode_audio(enc)
-        inputs_embeds, attn, _ = self._splice(input_ids, attention_mask, None,
-                                              audio_embeds, audio_lengths)
+        inputs_embeds, attn, _ = self._build_inputs_embeds(
+            input_ids, attention_mask, None,
+            input_features=input_features, feature_attention_mask=feature_attention_mask,
+            input_values=input_values, audio_attention_mask=audio_attention_mask,
+        )
         out = self.llm(inputs_embeds=inputs_embeds, attention_mask=attn)
         return out.logits, attn
 
@@ -179,11 +186,11 @@ class SpeechLLM(nn.Module):
     def generate(self, input_ids=None, attention_mask=None,
                  input_features=None, feature_attention_mask=None,
                  input_values=None, audio_attention_mask=None, **kwargs):
-        enc = self._encoder_inputs(input_features, feature_attention_mask,
-                                   input_values, audio_attention_mask)
-        audio_embeds, audio_lengths = self._encode_audio(enc)
-        inputs_embeds, attn, _ = self._splice(input_ids, attention_mask, None,
-                                              audio_embeds, audio_lengths)
+        inputs_embeds, attn, _ = self._build_inputs_embeds(
+            input_ids, attention_mask, None,
+            input_features=input_features, feature_attention_mask=feature_attention_mask,
+            input_values=input_values, audio_attention_mask=audio_attention_mask,
+        )
         return self.llm.generate(inputs_embeds=inputs_embeds, attention_mask=attn, **kwargs)
 
 
@@ -210,8 +217,8 @@ def build_speech_llm(config):
         dtype = (torch.bfloat16
                  if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
                  else torch.float32)
-    enc_builder = audio_encoders.get(speech.encoder.name)
-    encoder = enc_builder(speech.encoder, speech.sample_rate)
+    build_encoder = audio_encoders.get(speech.encoder.name)
+    encoder = build_encoder(speech.encoder, speech.sample_rate)
     # The AuT loads in fp32 by default; cast to the model dtype (bf16) so it matches the
     # LLM and the FA2 audio tower gets fp16/bf16 (FA2 rejects fp32) -- needed at eval,
     # where there's no autocast (training survived via the Trainer's autocast).
@@ -225,8 +232,8 @@ def build_speech_llm(config):
         **config.model.extra_kwargs,
     )
 
-    proj_builder = projectors.get(speech.projector.name)
-    projector = proj_builder(speech.projector, encoder.output_dim, llm.config.hidden_size)
+    build_projector = projectors.get(speech.projector.name)
+    projector = build_projector(speech.projector, encoder.output_dim, llm.config.hidden_size)
 
     # Tokenizer/special tokens come from the LLM; the <audio> marker is required.
     from transformers import AutoTokenizer

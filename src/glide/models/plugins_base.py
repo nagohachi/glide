@@ -1,22 +1,32 @@
 """Base classes for pluggable multimodal components (audio encoders, projectors).
 
 Subclass these in your project and register the *builder* with the appropriate
-registry. A builder is ``Callable[[GlideConfig], nn.Module]``::
+registry. glide calls the builders as
+
+* audio encoder: ``builder(cfg: AudioEncoderConfig, sample_rate: int) -> AudioEncoder``
+  (``cfg`` is ``speech.encoder``);
+* projector: ``builder(cfg: ProjectorConfig, in_dim: int, out_dim: int) -> Projector``
+  (``cfg`` is ``speech.projector``; ``in_dim`` is the encoder's ``output_dim``,
+  ``out_dim`` the LLM hidden size).
+
+For example::
 
     from glide.registry import audio_encoders
     from glide.models import AudioEncoder
 
     class MyWavLMEncoder(AudioEncoder):
-        def __init__(self, config):
+        input_kind = "input_values"
+
+        def __init__(self, cfg, sample_rate):
             super().__init__()
             ...
-        def forward(self, input_features, attention_mask=None):
+        def forward(self, input_values, attention_mask=None):
             ...
             return hidden_states, out_mask
 
-    @audio_encoders.register("wavlm")
-    def build_wavlm(config):
-        return MyWavLMEncoder(config)
+    @audio_encoders.register("my_wavlm")
+    def build_my_wavlm_encoder(cfg, sample_rate):
+        return MyWavLMEncoder(cfg, sample_rate)
 
 The base classes are deliberately thin -- they document the expected interface
 and keep ``glide`` import-safe even when torch is the only heavy dependency

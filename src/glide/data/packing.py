@@ -20,7 +20,12 @@ from typing import Sequence
 
 import torch
 
-__all__ = ["compute_packed_position_ids", "compute_cu_seqlens", "build_block_diagonal_causal_mask", "compute_segment_ids"]
+__all__ = [
+    "compute_packed_position_ids",
+    "compute_cu_seqlens",
+    "build_block_diagonal_causal_mask",
+    "compute_segment_ids",
+]
 
 
 def compute_segment_ids(seg_lengths: Sequence[int]) -> torch.Tensor:

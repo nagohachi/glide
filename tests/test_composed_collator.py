@@ -20,19 +20,24 @@ def test_user_turn_carries_audio_marker():
 
 
 def test_thinking_mode_adds_reasoning_content():
-    msgs = _build_collator(True)._build_messages({"text": "ans", "think": "because"}, with_target=True)
+    msgs = _build_collator(True)._build_messages(
+        {"text": "ans", "think": "because"}, with_target=True
+    )
     asst = msgs[-1]
     assert asst["role"] == "assistant" and asst["content"] == "ans"
     assert asst.get("reasoning_content") == "because"  # -> <think>because</think>ans
 
 
 def test_no_think_mode_omits_reasoning_content():
-    msgs = _build_collator(False)._build_messages({"text": "ans", "think": "because"}, with_target=True)
+    msgs = _build_collator(False)._build_messages(
+        {"text": "ans", "think": "because"}, with_target=True
+    )
     assert "reasoning_content" not in msgs[-1]
 
 
 def test_thinking_without_reasoning_field_is_plain():
-    msgs = _build_collator(True)._build_messages({"text": "ans"}, with_target=True)  # no 'think' key
+    # No 'think' key on the record.
+    msgs = _build_collator(True)._build_messages({"text": "ans"}, with_target=True)
     assert "reasoning_content" not in msgs[-1]
 
 

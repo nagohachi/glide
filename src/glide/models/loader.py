@@ -15,9 +15,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..config.schema import GlideConfig, Modality
-from .special_tokens import SpecialTokenInfo, apply_special_tokens
-
 from ..logging_utils import get_logger
+from .special_tokens import SpecialTokenInfo, apply_special_tokens
 
 _log = get_logger("models")
 
@@ -56,7 +55,8 @@ def resolve_dtype(name: str):
     }[name]
 
 
-def _quantization_config(model_cfg):
+def _build_quantization_config(model_cfg):
+    """Return the bitsandbytes 4-/8-bit config ``model_cfg`` asks for, or ``None``."""
     if not (model_cfg.load_in_4bit or model_cfg.load_in_8bit):
         return None
     from transformers import BitsAndBytesConfig
@@ -107,7 +107,8 @@ def load_model_and_processor(config: GlideConfig) -> LoadedModel:
         from .speech_llm import build_speech_llm
 
         model, tok, info = build_speech_llm(config)
-        _maybe_load_state_dict(model, config.model.state_dict_path)
+        if config.model.state_dict_path:
+            _load_state_dict_from_path(model, config.model.state_dict_path)
         return LoadedModel(model=model, processor=tok, tokenizer=tok, special_tokens=info)
 
     model_cfg = config.model
@@ -120,7 +121,7 @@ def load_model_and_processor(config: GlideConfig) -> LoadedModel:
         "trust_remote_code": model_cfg.trust_remote_code,
         **model_cfg.extra_kwargs,
     }
-    quant = _quantization_config(model_cfg)
+    quant = _build_quantization_config(model_cfg)
     if quant is not None:
         load_kwargs["quantization_config"] = quant
 
@@ -141,21 +142,20 @@ def load_model_and_processor(config: GlideConfig) -> LoadedModel:
     tokenizer = getattr(processor, "tokenizer", processor)
 
     _sanitize_generation_config(model)
-    _maybe_load_state_dict(model, model_cfg.state_dict_path)
+    if model_cfg.state_dict_path:
+        _load_state_dict_from_path(model, model_cfg.state_dict_path)
 
     return LoadedModel(model=model, processor=processor, tokenizer=tokenizer, special_tokens=info)
 
 
-def _maybe_load_state_dict(model, path: str | None) -> None:
-    """Load a saved state dict over ``model`` in place (``strict=False``), if given.
+def _load_state_dict_from_path(model, path: str) -> None:
+    """Load a saved state dict over ``model`` in place (``strict=False``).
 
     Used to initialise a model from a prior glide checkpoint (``pytorch_model.bin``)
     -- e.g. an SFT checkpoint as the GSPO starting policy. ``strict=False`` tolerates
     benign key drift (the composed Speech-LLM saves encoder/projector/llm together).
     Missing/unexpected keys are reported so a silent mismatch can't pass unnoticed.
     """
-    if not path:
-        return
     import torch
 
     state = torch.load(path, map_location="cpu", weights_only=False)
@@ -166,7 +166,7 @@ def _maybe_load_state_dict(model, path: str | None) -> None:
     result = model.load_state_dict(state, strict=False)
     missing, unexpected = list(result.missing_keys), list(result.unexpected_keys)
     _log.info(f"loaded state_dict from {path} "
-          f"(missing={len(missing)}, unexpected={len(unexpected)})")
+              f"(missing={len(missing)}, unexpected={len(unexpected)})")
     if missing:
         _log.info(f"  first missing: {missing[:8]}")
     if unexpected:

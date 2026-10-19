@@ -11,20 +11,22 @@ New token rows are initialized to the mean of the existing embeddings, which is 
 better starting point than random vectors for fine-tuning.
 """
 
+from dataclasses import dataclass
+
 from ..config.schema import SpecialTokensConfig
 
 __all__ = ["apply_special_tokens", "SpecialTokenInfo"]
 
 
+@dataclass
 class SpecialTokenInfo:
     """Resolved special-token ids, attached to the tokenizer/processor result."""
 
-    def __init__(self):
-        self.audio_token_id: int | None = None
-        self.audio_pad_token_id: int | None = None
-        self.image_token_id: int | None = None
-        self.image_pad_token_id: int | None = None
-        self.num_added: int = 0
+    audio_token_id: int | None = None
+    audio_pad_token_id: int | None = None
+    image_token_id: int | None = None
+    image_pad_token_id: int | None = None
+    num_added: int = 0
 
 
 def _get_tokenizer(processor):
@@ -79,13 +81,13 @@ def apply_special_tokens(processor, model, cfg: SpecialTokensConfig) -> SpecialT
         _resize_with_mean_init(model, len(tokenizer), info.num_added, cfg.pad_to_multiple_of)
 
     # Resolve ids for the semantic markers.
-    def _id(tok):
+    def _convert_token_to_id(tok):
         return tokenizer.convert_tokens_to_ids(tok) if tok else None
 
-    info.audio_token_id = _id(cfg.audio_token)
-    info.audio_pad_token_id = _id(cfg.audio_pad_token)
-    info.image_token_id = _id(cfg.image_token)
-    info.image_pad_token_id = _id(cfg.image_pad_token)
+    info.audio_token_id = _convert_token_to_id(cfg.audio_token)
+    info.audio_pad_token_id = _convert_token_to_id(cfg.audio_pad_token)
+    info.image_token_id = _convert_token_to_id(cfg.image_token)
+    info.image_pad_token_id = _convert_token_to_id(cfg.image_pad_token)
     return info
 
 

@@ -91,8 +91,8 @@ class RolloutBackend:
 class LocalRolloutBackend(RolloutBackend):
     """In-process rollout via :meth:`SpeechLLM.generate` (batch-1 per record).
 
-    ``build_generation_inputs`` right-pads (``_splice`` re-pads), which breaks batched
-    generation across records, so we generate one record at a time with
+    ``build_generation_inputs`` right-pads (``_splice_audio_embeddings`` re-pads), which
+    breaks batched generation across records, so we generate one record at a time with
     ``num_return_sequences=G``. Correct and simple; slower than a vLLM server.
     """
 
@@ -272,13 +272,13 @@ class SpeechGSPOTrainer(transformers.Trainer):
         self._sequence_level = gconf.task is Task.GSPO
         self._extra_logs: dict[str, float] = {}
         super().__init__(**kwargs)
-        # v1 is single-GPU: _completion_logps calls model.logits_with_audio (a custom
-        # method) which DistributedDataParallel does not proxy -> AttributeError at step 1.
+        # v1 is single-GPU: _compute_completion_logps calls model.compute_logits_with_audio (a
+        # custom method) which DistributedDataParallel does not proxy -> AttributeError at step 1.
         # Fail loudly with a fix instead of crashing cryptically.
         if self.accelerator.num_processes > 1:
             raise NotImplementedError(
-                "Speech GSPO/GRPO (rl_speech) is single-GPU only in v1: the grad forward "
-                "calls model.logits_with_audio on the DDP-wrapped model, which DDP does not "
+                "Speech GSPO/GRPO (rl_speech) is single-GPU only in v1: the grad forward calls "
+                "model.compute_logits_with_audio on the DDP-wrapped model, which DDP does not "
                 "proxy. Pin distributed.nproc_per_node: 1 and run on a single visible GPU."
             )
         self.add_callback(_SpeechRLCallback(self))
@@ -339,7 +339,7 @@ class SpeechGSPOTrainer(transformers.Trainer):
             attn[i, : P + lc] = 1
 
         audio_b = {k: v.to(device).repeat(g, *([1] * (v.dim() - 1))) for k, v in audio.items()}
-        logits, sp_attn = model.logits_with_audio(
+        logits, sp_attn = model.compute_logits_with_audio(
             input_ids=input_ids, attention_mask=attn, **audio_b
         )
         # Divide logits by the sampling temperature before scoring: vLLM's old_logps come

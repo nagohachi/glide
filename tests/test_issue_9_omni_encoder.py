@@ -3,22 +3,20 @@
 import torch
 
 
-def test_omni_tower_forward_shapes(monkeypatch):
-    import transformers
+def test_omni_tower_forward_shapes():
     from transformers.models.qwen2_5_omni import modeling_qwen2_5_omni as m
 
-    from glide.models.encoders import _build_omni_tower
+    from glide.models.encoders import QwenOmniAudioTowerEncoder
 
     cfg = m.Qwen2_5OmniAudioEncoderConfig(
         num_mel_bins=8, encoder_layers=2, encoder_attention_heads=2, encoder_ffn_dim=16,
         d_model=16, max_source_positions=512, n_window=4, output_dim=24,
     )
     tower = m.Qwen2_5OmniAudioEncoder(cfg).eval()
-    # Avoid the network: the feature extractor is only used by the collator, not forward.
-    monkeypatch.setattr(transformers.AutoFeatureExtractor, "from_pretrained",
-                        staticmethod(lambda *a, **k: object()))
-
-    enc = _build_omni_tower(tower, repo="dummy", out_dim=cfg.output_dim, freeze=True)
+    # The feature extractor is only used by the collator, not forward.
+    enc = QwenOmniAudioTowerEncoder(
+        tower, feature_extractor=None, output_dim=cfg.output_dim, freeze=True
+    )
     assert enc.output_dim == 24  # config.output_dim, not d_model (16)
 
     b, mels, t = 2, 8, 48
