@@ -50,15 +50,21 @@ __all__ = [
 class Registry(Generic[T]):
     """A named collection of components of one kind."""
 
-    def __init__(self, kind: str):
+    def __init__(self, kind: str) -> None:
         self.kind = kind
         self._store: dict[str, T] = {}
 
-    def register(self, name: str, obj: T | None = None, *, exist_ok: bool = False):
+    def register(
+        self, name: str, obj: T | None = None, *, exist_ok: bool = False
+    ) -> Callable[[T], T] | T:
         """Register ``obj`` under ``name``.
 
         Usable as a decorator (``@reg.register("x")``) or directly
         (``reg.register("x", obj)``).
+
+        Returns:
+            The decorator ``Callable[[T], T]`` when ``obj`` is ``None``,
+            otherwise ``obj`` itself so the direct call is also chainable.
         """
 
         def _do(value: T) -> T:

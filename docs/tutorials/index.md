@@ -7,5 +7,6 @@ Hands-on walkthroughs. Each assumes you've installed glide (`uv sync --extra cu1
 - [LLM GRPO](llm_grpo.md) — RL with GRPO/GSPO and reward functions.
 - [Speech SFT](speech_sft.md) — ASR/AST fine-tuning with WER/CER/BLEU eval.
 - [Speech GRPO](speech_grpo.md) — RL for ASR error-correction (text-side CER reward).
+- [The registry](registry.md) — how components are named, resolved and extended.
 
 API reference: `glide docs -o docs/api` (generated from docstrings with pdoc).
