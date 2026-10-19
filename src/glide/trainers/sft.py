@@ -17,7 +17,7 @@ from ..data.build import (
     compute_audio_lengths,
 )
 from ..data.collator import MultimodalSFTCollator
-from ..data.jsonl import read_jsonl
+from ..data.jsonl import read_jsonl_files
 from ..models.loader import load_model_and_processor
 from .common import init_plugins, maybe_generation_callback, maybe_test_callback
 from .length_sampler_trainer import LengthGroupedSFTTrainer
@@ -30,21 +30,8 @@ def _build_collator(config: GlideConfig, loaded):
     if config.is_composed_speech_llm():
         from ..data.composed_collator import ComposedSpeechCollator
 
-        audio_token = config.special_tokens.audio_token
-        if not audio_token:
-            raise ValueError("composed Speech-LLM requires special_tokens.audio_token")
-        encoder = loaded.model.encoder
-        return ComposedSpeechCollator(
-            tokenizer=loaded.tokenizer,
-            feature_extractor=encoder.feature_extractor,
-            input_kind=encoder.input_kind,
-            audio_token=audio_token,
-            data=config.data,
-            template=config.template,
-            sample_rate=config.speech.sample_rate,
-            speed_perturb=config.speech.augment.speed_perturb,
-            specaugment=config.speech.augment.specaugment,
-            completion_only=config.template.train_on_completions_only,
+        return ComposedSpeechCollator.from_config(
+            config, loaded.tokenizer, loaded.model.encoder, train=True
         )
     if config.template.collator:
         from ..registry import collators
@@ -131,11 +118,7 @@ def build_sft_trainer(config: GlideConfig):
     callbacks = []
     eval_records = None
     if config.eval.generate.enabled and config.data.eval_jsonl_path is not None:
-        paths = (config.data.eval_jsonl_path if isinstance(config.data.eval_jsonl_path, list)
-                 else [config.data.eval_jsonl_path])
-        eval_records = []
-        for p in paths:
-            eval_records.extend(read_jsonl(p))
+        eval_records = read_jsonl_files(config.data.eval_jsonl_path)
         # Cap AR-eval records (generation is slow); matches the teacher-forced eval cap.
         if config.data.max_eval_samples is not None:
             eval_records = eval_records[: config.data.max_eval_samples]

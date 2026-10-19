@@ -20,7 +20,7 @@ from typing import Any, Sequence
 
 from torch.utils.data import Dataset
 
-__all__ = ["JsonlDataset", "load_hf_dataset", "read_jsonl"]
+__all__ = ["JsonlDataset", "load_hf_dataset", "read_jsonl", "read_jsonl_files"]
 
 
 def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
@@ -31,6 +31,18 @@ def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
             line = line.strip()
             if line:
                 rows.append(json.loads(line))
+    return rows
+
+
+def read_jsonl_files(paths: str | Path | Sequence[str | Path] | None) -> list[dict[str, Any]]:
+    """Eagerly read one JSONL path or a list of them, concatenated (``None`` -> ``[]``)."""
+    if paths is None:
+        return []
+    if isinstance(paths, (str, Path)):
+        paths = [paths]
+    rows: list[dict[str, Any]] = []
+    for path in paths:
+        rows.extend(read_jsonl(path))
     return rows
 
 
@@ -79,9 +91,7 @@ class JsonlDataset(Dataset[dict[str, Any]]):
             if max_samples is not None:
                 self._index = self._index[:max_samples]
         else:
-            recs: list[dict[str, Any]] = []
-            for p in self.paths:
-                recs.extend(read_jsonl(p))
+            recs = read_jsonl_files(self.paths)
             if max_samples is not None:
                 recs = recs[:max_samples]
             self._records = recs
@@ -89,7 +99,8 @@ class JsonlDataset(Dataset[dict[str, Any]]):
     def __len__(self) -> int:
         return len(self._index) if self.lazy else len(self._records or [])
 
-    def _ensure_files(self):
+    def _get_open_files(self):
+        """Return this process's open handles to :attr:`paths`, opening them if needed."""
         # Open files lazily and per-process. DataLoader workers are fork-spawned on
         # Linux, and fork bypasses __getstate__, so a child would otherwise inherit the
         # parent's open file *descriptions* -- sharing a single seek offset across
@@ -104,7 +115,7 @@ class JsonlDataset(Dataset[dict[str, Any]]):
     def __getitem__(self, index: int) -> dict[str, Any]:
         if self.lazy:
             fi, offset = self._index[index]
-            f = self._ensure_files()[fi]
+            f = self._get_open_files()[fi]
             f.seek(offset)
             record = json.loads(f.readline().decode("utf-8"))
         else:

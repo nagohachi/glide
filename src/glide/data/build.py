@@ -18,7 +18,7 @@ import time
 from typing import Any
 
 from ..config.schema import GlideConfig, Modality
-from .audio import audio_num_samples
+from .audio import count_audio_samples
 from .jsonl import JsonlDataset, load_hf_dataset
 from .template import build_messages, build_prompt_messages
 
@@ -34,14 +34,14 @@ def build_sft_text_dataset(config: GlideConfig, split: str):
 
     data, template = config.data, config.template
 
-    def _to_prompt_completion(rec: dict[str, Any]) -> dict[str, Any]:
+    def _convert_to_prompt_completion(rec: dict[str, Any]) -> dict[str, Any]:
         messages = build_messages(rec, data, template, Modality.TEXT)
         if messages and messages[-1].get("role") == "assistant":
             return {"prompt": messages[:-1], "completion": [messages[-1]]}
         # No assistant turn -> treat whole thing as a language-modeling sample.
         return {"prompt": messages, "completion": [{"role": "assistant", "content": ""}]}
 
-    return ds.map(_to_prompt_completion, remove_columns=ds.column_names)
+    return ds.map(_convert_to_prompt_completion, remove_columns=ds.column_names)
 
 
 def build_rl_text_dataset(config: GlideConfig, split: str):
@@ -53,11 +53,11 @@ def build_rl_text_dataset(config: GlideConfig, split: str):
 
     data, template = config.data, config.template
 
-    def _to_prompt(rec: dict[str, Any]) -> dict[str, Any]:
+    def _convert_to_prompt(rec: dict[str, Any]) -> dict[str, Any]:
         return {"prompt": build_prompt_messages(rec, data, template, Modality.TEXT)}
 
     # Keep all original columns (reward funcs receive them as kwargs).
-    return ds.map(_to_prompt)
+    return ds.map(_convert_to_prompt)
 
 
 def build_multimodal_dataset(config: GlideConfig, split: str):
@@ -77,7 +77,7 @@ def _get_split_source(
     return path, max_n
 
 
-def _lengths_from_manifest(dataset: JsonlDataset, config: GlideConfig) -> list[int] | None:
+def _read_lengths_from_manifest(dataset: JsonlDataset, config: GlideConfig) -> list[int] | None:
     """Return per-sample lengths from a manifest duration/num_samples field, or ``None``.
 
     Zero file I/O -- most ASR manifests already carry ``duration``. Returns ``None`` if
@@ -108,52 +108,60 @@ def _list_train_manifest_paths(config: GlideConfig) -> list[str]:
     return [str(x) for x in (p if isinstance(p, list) else [p])]
 
 
-def _lengths_cache_key(config: GlideConfig) -> str:
-    """Fingerprint the manifests + relevant config so a stale cache is never reused."""
-    parts: list[Any] = [config.data.audio_field, config.speech.sample_rate,
-                        config.data.max_train_samples]
-    for path in _list_train_manifest_paths(config):
+class _AudioLengthCache:
+    """On-disk cache of per-sample audio lengths, stored next to the first manifest.
+
+    ``key`` fingerprints the manifests (path, mtime, size) and the config fields that
+    change the lengths, so a stale scan is never reused. ``path`` is ``None`` when no
+    train manifest is configured; every read then misses and writes are skipped.
+    """
+
+    def __init__(self, path: str | None, key: str):
+        self.path = path
+        self.key = key
+
+    @classmethod
+    def from_config(cls, config: GlideConfig) -> "_AudioLengthCache":
+        manifests = _list_train_manifest_paths(config)
+        parts: list[Any] = [config.data.audio_field, config.speech.sample_rate,
+                            config.data.max_train_samples]
+        for manifest in manifests:
+            try:
+                st = os.stat(manifest)
+                parts.append((manifest, int(st.st_mtime), int(st.st_size)))
+            except OSError:
+                parts.append((manifest, None, None))
+        key = hashlib.sha1(json.dumps(parts, sort_keys=True).encode()).hexdigest()
+        path = manifests[0] + ".glide-lengths.json" if manifests else None
+        return cls(path, key)
+
+    def read(self, num_samples: int) -> list[int] | None:
+        """Return the cached lengths, or ``None`` on a missing/stale/corrupt cache."""
+        if not self.path or not os.path.isfile(self.path):
+            return None
         try:
-            st = os.stat(path)
-            parts.append((path, int(st.st_mtime), int(st.st_size)))
-        except OSError:
-            parts.append((path, None, None))
-    return hashlib.sha1(json.dumps(parts, sort_keys=True).encode()).hexdigest()
-
-
-def _lengths_cache_path(config: GlideConfig) -> str | None:
-    paths = _list_train_manifest_paths(config)
-    if not paths:
+            with open(self.path) as f:
+                blob = json.load(f)
+        except (OSError, ValueError):
+            return None
+        if blob.get("key") == self.key and len(blob.get("lengths", [])) == num_samples:
+            return [int(x) for x in blob["lengths"]]
         return None
-    return paths[0] + ".glide-lengths.json"
 
-
-def _read_lengths_cache(cache_path: str | None, key: str, n: int) -> list[int] | None:
-    if not cache_path or not os.path.isfile(cache_path):
-        return None
-    try:
-        with open(cache_path) as f:
-            blob = json.load(f)
-    except (OSError, ValueError):
-        return None
-    if blob.get("key") == key and len(blob.get("lengths", [])) == n:
-        return [int(x) for x in blob["lengths"]]
-    return None
-
-
-def _write_lengths_cache(cache_path: str | None, key: str, lengths: list[int]) -> None:
-    if not cache_path:
-        return
-    tmp = f"{cache_path}.tmp.{os.getpid()}"
-    try:
-        with open(tmp, "w") as f:
-            json.dump({"key": key, "lengths": lengths}, f)
-        os.replace(tmp, cache_path)  # atomic
-    except OSError:
+    def write(self, lengths: list[int]) -> None:
+        """Atomically replace the cache file (best effort: I/O errors are swallowed)."""
+        if not self.path:
+            return
+        tmp = f"{self.path}.tmp.{os.getpid()}"
         try:
-            os.remove(tmp)
+            with open(tmp, "w") as f:
+                json.dump({"key": self.key, "lengths": lengths}, f)
+            os.replace(tmp, self.path)
         except OSError:
-            pass
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
 
 def _scan_audio_lengths(dataset: JsonlDataset, field: str, sr: int) -> list[int]:
@@ -162,12 +170,12 @@ def _scan_audio_lengths(dataset: JsonlDataset, field: str, sr: int) -> list[int]
 
     refs = [dataset[i].get(field) for i in range(len(dataset))]
 
-    def _one(ref):
-        return audio_num_samples(ref, sr) if ref is not None else 0
+    def _count_samples(ref):
+        return count_audio_samples(ref, sr) if ref is not None else 0
 
     workers = min(16, (os.cpu_count() or 4) * 2)
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        return list(ex.map(_one, refs))
+        return list(ex.map(_count_samples, refs))
 
 
 def compute_audio_lengths(dataset: JsonlDataset, config: GlideConfig) -> list[int]:
@@ -181,30 +189,28 @@ def compute_audio_lengths(dataset: JsonlDataset, config: GlideConfig) -> list[in
     field = config.data.audio_field
     sr = config.speech.sample_rate
 
-    manifest = _lengths_from_manifest(dataset, config)
+    manifest = _read_lengths_from_manifest(dataset, config)
     if manifest is not None:
         return manifest
 
     n = len(dataset)
-    key = _lengths_cache_key(config)
-    cache_path = _lengths_cache_path(config)
-
-    cached = _read_lengths_cache(cache_path, key, n)
+    cache = _AudioLengthCache.from_config(config)
+    cached = cache.read(n)
     if cached is not None:
         return cached
 
     rank = int(os.environ.get("RANK", "0"))
     world = int(os.environ.get("WORLD_SIZE", "1"))
-    if world > 1 and rank != 0 and cache_path:
+    if world > 1 and rank != 0 and cache.path:
         # Let rank 0 do the (possibly minutes-long NFS) scan; poll for its cache rather
         # than launching N identical sweeps. Fall back to scanning locally on timeout.
         deadline = time.time() + 1800
         while time.time() < deadline:
-            cached = _read_lengths_cache(cache_path, key, n)
+            cached = cache.read(n)
             if cached is not None:
                 return cached
             time.sleep(2.0)
 
     lengths = _scan_audio_lengths(dataset, field, sr)
-    _write_lengths_cache(cache_path, key, lengths)
+    cache.write(lengths)
     return lengths

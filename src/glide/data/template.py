@@ -20,19 +20,20 @@ from ..config.schema import DataConfig, Modality, TemplateConfig
 __all__ = ["build_messages", "build_prompt_messages", "extract_media", "extract_reference"]
 
 
-def _ensure_system(messages: list[dict], template: TemplateConfig) -> list[dict]:
+def _ensure_system_message(messages: list[dict], template: TemplateConfig) -> list[dict]:
+    """Prepend ``template.system_prompt`` unless the conversation already has a system turn."""
     if template.system_prompt and not (messages and messages[0].get("role") == "system"):
         return [{"role": "system", "content": template.system_prompt}, *messages]
     return messages
 
 
-def _media_block(modality: Modality, record: dict, data: DataConfig) -> dict | None:
+def _build_media_block(modality: Modality, record: dict, data: DataConfig) -> dict | None:
     """Return a media content block (``{"type": "audio"|"image", ...}``) or None."""
-    if modality is Modality.SPEECH and data.audio_field in record:
-        return {"type": "audio", "audio": record[data.audio_field]}
-    if modality is Modality.VISION and data.image_field in record:
-        return {"type": "image", "image": record[data.image_field]}
-    return None
+    ref = extract_media(record, data, modality)
+    if ref is None:
+        return None
+    kind = "audio" if modality is Modality.SPEECH else "image"
+    return {"type": kind, kind: ref}
 
 
 def build_messages(
@@ -55,11 +56,11 @@ def build_messages(
         if data.response_field in record:
             messages.append({"role": "assistant", "content": record[data.response_field]})
 
-    media = _media_block(modality, record, data)
+    media = _build_media_block(modality, record, data)
     if media is not None:
         messages = _inject_media(messages, media)
 
-    return _ensure_system(messages, template)
+    return _ensure_system_message(messages, template)
 
 
 def _inject_media(messages: list[dict], media: dict) -> list[dict]:

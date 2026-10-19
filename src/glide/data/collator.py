@@ -23,9 +23,9 @@ import torch
 
 from ..config.schema import DataConfig, Modality, TemplateConfig
 from .audio import load_audio
-from .template import build_messages
+from .template import build_messages, extract_media
 
-__all__ = ["MultimodalSFTCollator", "find_subsequence"]
+__all__ = ["MultimodalSFTCollator", "find_subsequence", "load_media"]
 
 
 def find_subsequence(haystack: list[int], needle: list[int]) -> int:
@@ -40,6 +40,22 @@ def find_subsequence(haystack: list[int], needle: list[int]) -> int:
         if haystack[start : start + len(needle)] == needle:
             return start
     return -1
+
+
+def load_media(record: dict, data: DataConfig, modality: Modality, sample_rate: int):
+    """Decode ``record``'s media for the processor, or ``None`` if it has none.
+
+    Speech -> a mono float32 waveform at ``sample_rate``; vision -> an RGB
+    ``PIL.Image`` (a non-path reference is passed through unchanged).
+    """
+    ref = extract_media(record, data, modality)
+    if ref is None:
+        return None
+    if modality is Modality.SPEECH:
+        return load_audio(ref, sample_rate)
+    from PIL import Image
+
+    return Image.open(ref).convert("RGB") if isinstance(ref, str) else ref
 
 
 def _detect_media_kwarg(processor, modality: Modality) -> str | None:
@@ -109,16 +125,6 @@ class MultimodalSFTCollator:
                 "template.train_on_completions_only=False to train on the full sequence."
             )
 
-    def _load_media(self, record: dict):
-        if self.modality is Modality.SPEECH and self.data.audio_field in record:
-            return load_audio(record[self.data.audio_field], self.sample_rate)
-        if self.modality is Modality.VISION and self.data.image_field in record:
-            from PIL import Image
-
-            ref = record[self.data.image_field]
-            return Image.open(ref).convert("RGB") if isinstance(ref, str) else ref
-        return None
-
     def __call__(self, records: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
         texts, media = [], []
         for rec in records:
@@ -128,7 +134,7 @@ class MultimodalSFTCollator:
                     messages, tokenize=False, add_generation_prompt=False
                 )
             )
-            m = self._load_media(rec)
+            m = load_media(rec, self.data, self.modality, self.sample_rate)
             if m is not None:
                 media.append(m)
 

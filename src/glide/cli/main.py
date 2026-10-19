@@ -230,7 +230,7 @@ class _GenerationCommand(_ConfigCommand):
             ``0`` on success, ``1`` if the split is not configured.
         """
         from ..config.loader import load_config
-        from ..data.jsonl import read_jsonl
+        from ..data.jsonl import read_jsonl_files
         from ..eval.generate import GenerationEvaluator
         from ..models.loader import load_model_and_processor
         from ..trainers.common import init_plugins
@@ -251,11 +251,7 @@ class _GenerationCommand(_ConfigCommand):
         if paths is None:
             _log.error("no data.%s_jsonl_path configured; nothing to evaluate.", self.split)
             return 1
-        if not isinstance(paths, list):
-            paths = [paths]
-        records = []
-        for path in paths:
-            records.extend(read_jsonl(path))
+        records = read_jsonl_files(paths)
 
         # Test scores the full set; max_eval_samples only caps validation.
         evaluator = GenerationEvaluator(

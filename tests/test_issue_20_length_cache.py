@@ -26,11 +26,11 @@ def test_compute_audio_lengths_from_manifest(tmp_path):
 
 
 def test_lengths_cache_round_trip(tmp_path):
-    from glide.data.build import _read_lengths_cache, _write_lengths_cache
+    from glide.data.build import _AudioLengthCache
 
-    cache = str(tmp_path / "m.jsonl.glide-lengths.json")
-    _write_lengths_cache(cache, "key123", [1, 2, 3])
-    assert _read_lengths_cache(cache, "key123", 3) == [1, 2, 3]
+    path = str(tmp_path / "m.jsonl.glide-lengths.json")
+    _AudioLengthCache(path, "key123").write([1, 2, 3])
+    assert _AudioLengthCache(path, "key123").read(3) == [1, 2, 3]
     # Wrong key or wrong length -> cache miss (never reuse a stale scan).
-    assert _read_lengths_cache(cache, "other", 3) is None
-    assert _read_lengths_cache(cache, "key123", 2) is None
+    assert _AudioLengthCache(path, "other").read(3) is None
+    assert _AudioLengthCache(path, "key123").read(2) is None

@@ -46,13 +46,9 @@ def maybe_test_callback(config: GlideConfig, processor):
     """Build a :class:`TestEvalCallback` from ``data.test_jsonl_path`` if configured."""
     if not config.eval.generate.enabled or config.data.test_jsonl_path is None:
         return None
-    from ..data.jsonl import read_jsonl
+    from ..data.jsonl import read_jsonl_files
 
-    paths = (config.data.test_jsonl_path if isinstance(config.data.test_jsonl_path, list)
-             else [config.data.test_jsonl_path])
-    test_records = []
-    for p in paths:
-        test_records.extend(read_jsonl(p))
+    test_records = read_jsonl_files(config.data.test_jsonl_path)
     if not test_records:
         return None
     # Test evaluation always scores the full set; max_eval_samples only caps validation.

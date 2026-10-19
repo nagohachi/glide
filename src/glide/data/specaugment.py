@@ -9,10 +9,10 @@ import torch
 
 from ..config.schema import SpecAugmentConfig
 
-__all__ = ["spec_augment"]
+__all__ = ["apply_spec_augment"]
 
 
-def spec_augment(features: torch.Tensor, cfg: SpecAugmentConfig, *,
+def apply_spec_augment(features: torch.Tensor, cfg: SpecAugmentConfig, *,
                  attention_mask: torch.Tensor | None = None,
                  generator: torch.Generator | None = None, mask_value: float = 0.0) -> torch.Tensor:
     """Return ``features`` with SpecAugment frequency/time masks applied in-place-safe.
@@ -45,7 +45,7 @@ def spec_augment(features: torch.Tensor, cfg: SpecAugmentConfig, *,
     else:
         lengths = [n_time] * batch
 
-    def _randint(high):
+    def _sample_randint(high):
         if high <= 0:
             return 0
         return int(torch.randint(0, high, (1,), generator=generator).item())
@@ -55,17 +55,17 @@ def spec_augment(features: torch.Tensor, cfg: SpecAugmentConfig, *,
         true_t = max(1, min(true_t, n_time))
         # Frequency masks.
         for _ in range(cfg.num_freq_mask):
-            w = _randint(min(cfg.freq_mask_width, n_mels) + 1)
+            w = _sample_randint(min(cfg.freq_mask_width, n_mels) + 1)
             if w == 0:
                 continue
-            f0 = _randint(n_mels - w + 1)
+            f0 = _sample_randint(n_mels - w + 1)
             flat[b, f0 : f0 + w, :] = mask_value
         # Time masks (width proportional to this utterance's true length).
         max_t = int(cfg.time_mask_width_ratio * true_t)
         for _ in range(cfg.num_time_mask):
-            w = _randint(max_t + 1)
+            w = _sample_randint(max_t + 1)
             if w == 0:
                 continue
-            t0 = _randint(true_t - w + 1)
+            t0 = _sample_randint(true_t - w + 1)
             flat[b, :, t0 : t0 + w] = mask_value
     return flat.reshape(features.shape)

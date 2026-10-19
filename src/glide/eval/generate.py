@@ -20,7 +20,7 @@ from typing import Any, Sequence
 from transformers import TrainerCallback
 
 from ..config.schema import GlideConfig, Modality
-from ..data.audio import load_audio
+from ..data.collator import load_media
 from ..data.template import build_prompt_messages, extract_reference
 from ..metrics.text_metrics import build_metric_fn
 
@@ -97,7 +97,7 @@ class GenerationEvaluator:
         """Build left-padded generation inputs for a batch of records."""
         if self._composed:
             assert self._composed_collator is not None
-            inputs = self._composed_collator.generation_inputs(batch_records)
+            inputs = self._composed_collator.build_generation_inputs(batch_records)
             return {k: (v.to(device) if hasattr(v, "to") else v) for k, v in inputs.items()}
         modality = self.config.modality
         # Only pass enable_thinking when configured (matches ComposedSpeechCollator).
@@ -112,14 +112,9 @@ class GenerationEvaluator:
                     msgs, tokenize=False, add_generation_prompt=True, **ct_kwargs
                 )
             )
-            if modality is Modality.SPEECH and self.config.data.audio_field in rec:
-                media.append(load_audio(rec[self.config.data.audio_field],
-                                        self.config.speech.sample_rate))
-            elif modality is Modality.VISION and self.config.data.image_field in rec:
-                from PIL import Image
-
-                ref = rec[self.config.data.image_field]
-                media.append(Image.open(ref).convert("RGB") if isinstance(ref, str) else ref)
+            item = load_media(rec, self.config.data, modality, self.config.speech.sample_rate)
+            if item is not None:
+                media.append(item)
 
         # Left padding is required for correct batched generation. Restore in a finally
         # so an exception mid-eval doesn't leave the shared tokenizer in left-padding
@@ -156,15 +151,8 @@ class GenerationEvaluator:
         if self._composed and self._composed_collator is None:
             from ..data.composed_collator import ComposedSpeechCollator
 
-            enc = gen_model.encoder
-            audio_token = self.config.special_tokens.audio_token
-            assert audio_token, "composed eval requires special_tokens.audio_token"
-            self._composed_collator = ComposedSpeechCollator(
-                tokenizer=self.tokenizer, feature_extractor=enc.feature_extractor,
-                input_kind=enc.input_kind, audio_token=audio_token,
-                data=self.config.data, template=self.config.template,
-                sample_rate=self.config.speech.sample_rate,
-                completion_only=self.config.template.train_on_completions_only, train=False,
+            self._composed_collator = ComposedSpeechCollator.from_config(
+                self.config, self.tokenizer, gen_model.encoder, train=False
             )
 
         model_was_training = gen_model.training

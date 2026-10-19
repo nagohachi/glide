@@ -91,7 +91,7 @@ class RolloutBackend:
 class LocalRolloutBackend(RolloutBackend):
     """In-process rollout via :meth:`SpeechLLM.generate` (batch-1 per record).
 
-    ``generation_inputs`` right-pads (``_splice`` re-pads), which breaks batched
+    ``build_generation_inputs`` right-pads (``_splice`` re-pads), which breaks batched
     generation across records, so we generate one record at a time with
     ``num_return_sequences=G``. Correct and simple; slower than a vLLM server.
     """
@@ -102,7 +102,7 @@ class LocalRolloutBackend(RolloutBackend):
         device = next(model.parameters()).device
         out: list[dict] = []
         for rec in records:
-            gi = ctx.collator.generation_inputs([rec])
+            gi = ctx.collator.build_generation_inputs([rec])
             gi = {k: v.to(device) for k, v in gi.items()}
             prompt_ids = gi["input_ids"][0].detach().to("cpu")
             audio = {k: v for k, v in gi.items()
@@ -202,7 +202,7 @@ class VLLMRolloutBackend(RolloutBackend):
         rollouts = resp["rollouts"]
         out: list[dict] = []
         for rec, comps_raw in zip(records, rollouts):
-            gi = ctx.collator.generation_inputs([rec])
+            gi = ctx.collator.build_generation_inputs([rec])
             gi = {k: v.to(device) for k, v in gi.items()}
             prompt_ids = gi["input_ids"][0].detach().to("cpu")
             audio = {k: v.detach() for k, v in gi.items()
@@ -473,17 +473,9 @@ def build_speech_rl_trainer(config: GlideConfig) -> SpeechGSPOTrainer:
                          "(e.g. `cer`).")
 
     tokenizer = loaded.tokenizer
-    enc = loaded.model.encoder
-    collator = ComposedSpeechCollator(
-        tokenizer=tokenizer,
-        feature_extractor=enc.feature_extractor,
-        input_kind=enc.input_kind,
-        audio_token=config.special_tokens.audio_token,
-        data=config.data,
-        template=config.template,
-        sample_rate=config.speech.sample_rate,
-        completion_only=config.template.train_on_completions_only,
-        train=False,  # no speed-perturb / specaugment during rollout
+    # train=False: no speed-perturb / specaugment during rollout.
+    collator = ComposedSpeechCollator.from_config(
+        config, tokenizer, loaded.model.encoder, train=False
     )
 
     pad_id = tokenizer.pad_token_id

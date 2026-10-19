@@ -10,8 +10,8 @@ from glide.config.schema import (
     SpecAugmentConfig,
     SpeedPerturbConfig,
 )
-from glide.data.audio import speed_perturb
-from glide.data.specaugment import spec_augment
+from glide.data.audio import perturb_speed
+from glide.data.specaugment import apply_spec_augment
 from glide.models.projectors import MLPGeLUProjector
 
 
@@ -31,14 +31,14 @@ def test_mlp_gelu_projector_downsample_stacks_frames():
 # --- specaugment -------------------------------------------------------------
 def test_spec_augment_disabled_is_noop():
     feats = torch.randn(1, 80, 100)
-    same = spec_augment(feats, SpecAugmentConfig(enabled=False))
+    same = apply_spec_augment(feats, SpecAugmentConfig(enabled=False))
     assert torch.equal(feats, same)
 
 
 def test_spec_augment_masks_some_bins_and_keeps_shape():
     feats = torch.ones(1, 80, 200)
     g = torch.Generator().manual_seed(0)
-    out = spec_augment(
+    out = apply_spec_augment(
         feats, SpecAugmentConfig(enabled=True, num_freq_mask=2, num_time_mask=2), generator=g
     )
     assert out.shape == feats.shape
@@ -49,12 +49,12 @@ def test_spec_augment_masks_some_bins_and_keeps_shape():
 # --- speed perturbation ------------------------------------------------------
 def test_speed_perturb_identity_at_factor_one():
     wav = np.random.randn(16000).astype(np.float32)
-    assert np.array_equal(speed_perturb(wav, 1.0, 16000), wav)
+    assert np.array_equal(perturb_speed(wav, 1.0, 16000), wav)
 
 
 def test_speed_perturb_changes_length():
     wav = np.random.randn(16000).astype(np.float32)
-    faster = speed_perturb(wav, 1.5, 16000)   # ~1/1.5 the samples
+    faster = perturb_speed(wav, 1.5, 16000)   # ~1/1.5 the samples
     assert abs(len(faster) - 16000 / 1.5) < 50
 
 

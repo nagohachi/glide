@@ -81,7 +81,8 @@ class LengthGroupedBatchSampler(Sampler[list[int]]):
         self.epoch = 0
         self._cached_len: int | None = None
 
-    def _batches(self) -> list[list[int]]:
+    def _build_batches(self) -> list[list[int]]:
+        """Return this rank's batches for the current epoch (see the module docstring)."""
         n = len(self.lengths)
         indices = list(range(n))
 
@@ -102,13 +103,9 @@ class LengthGroupedBatchSampler(Sampler[list[int]]):
         batches: list[list[int]] = []
         for mb in megabatches:
             if self.max_tokens is not None:
-                batches.extend(self._dynamic_batches(mb))
+                batches.extend(self._build_dynamic_batches(mb))
             else:
-                for i in range(0, len(mb), self.batch_size):
-                    batch = mb[i : i + self.batch_size]
-                    if self.drop_last and len(batch) < self.batch_size:
-                        continue
-                    batches.append(batch)
+                batches.extend(self._build_fixed_batches(mb))
 
         if self.shuffle:
             rng = random.Random(self.seed + self.epoch + 1)
@@ -121,33 +118,40 @@ class LengthGroupedBatchSampler(Sampler[list[int]]):
             batches = batches[self.rank : even : self.num_replicas]
         return batches
 
-    def _dynamic_batches(self, mb: list[int]) -> list[list[int]]:
+    def _build_fixed_batches(self, mb: list[int]) -> list[list[int]]:
+        """Cut a (length-sorted) mega-batch into ``batch_size`` chunks."""
+        batches = [mb[i : i + self.batch_size] for i in range(0, len(mb), self.batch_size)]
+        if self.drop_last and batches and len(batches[-1]) < self.batch_size:
+            batches.pop()
+        return batches
+
+    def _build_dynamic_batches(self, mb: list[int]) -> list[list[int]]:
         """Pack a (length-sorted) mega-batch into token-budgeted batches."""
         assert self.max_tokens is not None  # only called in dynamic mode
         budget = self.max_tokens
         out: list[list[int]] = []
         cur: list[int] = []
+        cur_tokens = 0
         for idx in mb:
             ln = self.lengths[idx]
-            over_budget = cur and sum(self.lengths[i] for i in cur) + ln > budget
-            over_count = len(cur) >= self.batch_size
-            if cur and (over_budget or over_count):
+            if cur and (cur_tokens + ln > budget or len(cur) >= self.batch_size):
                 out.append(cur)
-                cur = []
+                cur, cur_tokens = [], 0
             cur.append(idx)
+            cur_tokens += ln
         if cur:
             out.append(cur)
         return out
 
     def __iter__(self) -> Iterator[list[int]]:
-        yield from self._batches()
+        yield from self._build_batches()
 
     def __len__(self) -> int:
         # Dynamic budgeting and distributed striping make the count depend on the
         # (epoch-dependent) grouping, so compute it once and cache.
         if self.max_tokens is not None or self.num_replicas > 1:
             if self._cached_len is None:
-                self._cached_len = len(self._batches())
+                self._cached_len = len(self._build_batches())
             return self._cached_len
         n = len(self.lengths)
         if self.drop_last:

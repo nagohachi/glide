@@ -20,7 +20,7 @@ def test_composed_collator_no_double_special_tokens(fast_tokenizer):
         completion_only=True, train=False,
     )
     rec = {"prompt": "hi", "response": "hello world", "audio": [0.0] * 100}
-    full_text = col._full_text(rec)
+    full_text = col._render_full_text(rec)
     # Training ids must equal the chat-template render tokenized with NO extra special
     # tokens -- i.e. the collator did not prepend an auto-BOS on top of the template's.
     expected = tok(full_text, add_special_tokens=False)["input_ids"]

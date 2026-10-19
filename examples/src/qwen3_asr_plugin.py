@@ -30,7 +30,11 @@ from typing import Any
 import torch
 
 from glide.data.audio import load_audio
-from glide.data.packing import block_diagonal_causal_mask, cu_seqlens, packed_position_ids
+from glide.data.packing import (
+    build_block_diagonal_causal_mask,
+    compute_cu_seqlens,
+    compute_packed_position_ids,
+)
 from glide.registry import collators
 
 
@@ -194,13 +198,13 @@ class Qwen3ASRPackedCollator:
         packed["feature_attention_mask"] = fmask
 
         # mRoPE position_ids reset to 0 at every example boundary (sequential rope).
-        pos = packed_position_ids(e_lens).view(1, -1)
+        pos = compute_packed_position_ids(e_lens).view(1, -1)
         packed["position_ids"] = pos.unsqueeze(0).expand(3, 1, total).clone()
 
         if self.attn_mode == "fa2":
             # FA2 varlen: hand the kernel the segment boundaries; flash-attn does
             # block-diagonal causal attention within each segment. No dense mask.
-            cu, max_len = cu_seqlens(e_lens)
+            cu, max_len = compute_cu_seqlens(e_lens)
             packed["cu_seq_lens_q"] = cu
             packed["cu_seq_lens_k"] = cu
             packed["max_length_q"] = max_len
@@ -211,7 +215,7 @@ class Qwen3ASRPackedCollator:
             # which would be `Tensor * None`. Omitting it routes TRL to position_ids.
         else:
             # SDPA: dense (1,1,T,T) block-diagonal causal bool mask (True=attend).
-            packed["attention_mask"] = block_diagonal_causal_mask(e_lens)
+            packed["attention_mask"] = build_block_diagonal_causal_mask(e_lens)
 
         # labels: keep targets, mask each example's prefix span.
         labels = packed["input_ids"].clone()
