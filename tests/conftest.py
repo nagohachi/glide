@@ -81,5 +81,8 @@ def pytest_collection_modifyitems(config, items):
         return
     skip_gpu = pytest.mark.skip(reason="CUDA GPU not available")
     for item in items:
-        if "gpu" in item.keywords:
+        # get_closest_marker, not `"gpu" in item.keywords`: keywords also hold the
+        # test's package names, so every test under tests/gpu/ (including the
+        # CPU-only end-to-end test) would be skipped.
+        if item.get_closest_marker("gpu") is not None:
             item.add_marker(skip_gpu)
